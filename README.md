@@ -31,6 +31,9 @@ You can check out [the Next.js GitHub repository](https://github.com/vercel/next
 
 ## Deploy on Vercel
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+1. Import [this repo](https://github.com/RobNatt/seo-geo-automations) in the [Vercel dashboard](https://vercel.com/new) (framework: Next.js; leave defaults).
+2. Add environment variables from [`.env.example`](./.env.example). At minimum set **`DATABASE_URL`**.
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+**Database note:** This app uses **SQLite** via Prisma. A file-based DB on Vercel’s serverless runtime is **not durable** (each invocation may not share the same disk, and the filesystem is ephemeral). For a real production deployment, plan on **Postgres** (e.g. [Vercel Postgres](https://vercel.com/docs/storage/vercel-postgres) or [Neon](https://neon.tech)) or **Turso** (libSQL), then point `DATABASE_URL` at that service and adjust the Prisma provider/schema as needed. For a smoke-test deploy, you can still verify that the **build** succeeds with a placeholder `DATABASE_URL` if Prisma does not need a live DB at build time (this project runs `prisma generate` in `postinstall` / `build`).
+
+See also: [Next.js deployment](https://nextjs.org/docs/app/building-your-application/deploying).
