@@ -1,0 +1,272 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Site {
+  id               String   @id @default(cuid())
+  rootUrl          String   @unique
+  businessName     String
+  geoHint          String?
+  primaryFocus     String?
+  /// intake: registered, no successful audit yet · audited: last completed run succeeded · blocked: last run failed
+  onboardingStage  String   @default("intake")
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  pages            Page[]
+  fixTasks         SiteFixTask[]
+  launchCheckItems SiteLaunchCheckItem[]
+  promptClusters    PromptCluster[]
+  contentQueueItems         ContentQueueItem[]
+  contentBriefs             ContentBrief[]
+  contentPerformanceSnapshots ContentPerformanceSnapshot[]
+  contentRefreshQueueItems    ContentRefreshQueueItem[]
+  pageRefreshWorkflows        PageRefreshWorkflow[]
+}
+
+/// Opportunities selected for manual content execution; one row per (site, opportunityKey).
+model ContentQueueItem {
+  id             String   @id @default(cuid())
+  siteId         String
+  site           Site     @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  pageId         String?
+  page           Page?    @relation(fields: [pageId], references: [id], onDelete: SetNull)
+  /// Stable id (rule key, pipeline id, cluster key, etc.) — dedupes unresolved work per site.
+  opportunityKey String
+  category       String
+  /// queued | in_progress | done | cancelled
+  status         String   @default("queued")
+  priority       Int      @default(50)
+  title          String
+  detail         String?
+  /// brief | draft | review | sanitize | publish_ready — null until the drafting pipeline is started.
+  pipelineStage     String?
+  /// Versioned JSON blobs for draft text, checklist state, sanitize override (see lib/sites/content-draft-pipeline).
+  pipelineArtifacts Json?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  contentBrief ContentBrief?
+
+  @@unique([siteId, opportunityKey])
+  @@index([siteId, status])
+  @@index([siteId, priority])
+}
+
+/// Manual refresh backlog: one row per page; reopen by updating the same row after done/cancelled.
+model ContentRefreshQueueItem {
+  id        String   @id @default(cuid())
+  siteId    String
+  site      Site     @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  pageId    String   @unique
+  page      Page     @relation(fields: [pageId], references: [id], onDelete: Cascade)
+  /// queued | in_progress | done | cancelled
+  status    String   @default("queued")
+  priority  Int      @default(50)
+  reason    String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([siteId, status])
+  @@index([siteId, priority])
+}
+
+/// Stored content brief — deterministic fields only; source of truth for drafting and repurposing.
+model ContentBrief {
+  id                 String   @id @default(cuid())
+  siteId             String
+  site               Site     @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  contentQueueItemId String?  @unique
+  contentQueueItem   ContentQueueItem? @relation(fields: [contentQueueItemId], references: [id], onDelete: Cascade)
+  pageId             String?
+  page               Page?    @relation(fields: [pageId], references: [id], onDelete: SetNull)
+  topic              String
+  intent             String
+  audience           String
+  primaryPoints      Json
+  repurposingTargets Json
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  @@index([siteId])
+}
+
+/// GEO / LLM-style prompt groups for content planning; deterministic `key` per site.
+model PromptCluster {
+  id        String   @id @default(cuid())
+  siteId    String
+  site      Site     @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  /// Stable id for upserts (e.g. "local_service_queries").
+  key       String
+  title     String
+  /// JSON array of prompt strings, in display order.
+  prompts   Json
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  pages Page[]
+
+  @@unique([siteId, key])
+  @@index([siteId])
+}
+
+/// Deterministic go-live checklist rows; one per known key per site (manual booleans).
+model SiteLaunchCheckItem {
+  id        String   @id @default(cuid())
+  siteId    String
+  site      Site     @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  key       String
+  done      Boolean  @default(false)
+  updatedAt DateTime @updatedAt
+
+  @@unique([siteId, key])
+}
+
+model Service {
+  id        String   @id @default(cuid())
+  name      String
+  slug      String   @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  pages     Page[]
+}
+
+model Page {
+  id        String   @id @default(cuid())
+  url       String   @unique
+  title     String?
+  status    String   @default("active")
+  siteId    String?
+  site      Site?    @relation(fields: [siteId], references: [id], onDelete: SetNull)
+  serviceId String?
+  service   Service? @relation(fields: [serviceId], references: [id], onDelete: SetNull)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  auditRuns    AuditRun[]
+  triggerTasks TriggerTask[]
+  fixTasks     SiteFixTask[]
+
+  promptClusters    PromptCluster[]
+  contentQueueItems ContentQueueItem[]
+  contentBriefs     ContentBrief[]
+  performanceSnapshots ContentPerformanceSnapshot[]
+  contentRefreshQueueItem ContentRefreshQueueItem?
+  pageRefreshWorkflow     PageRefreshWorkflow?
+}
+
+/// Manual page refresh checklist progress (no generated copy).
+model PageRefreshWorkflow {
+  id        String   @id @default(cuid())
+  siteId    String
+  site      Site     @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  pageId    String   @unique
+  page      Page     @relation(fields: [pageId], references: [id], onDelete: Cascade)
+  /// JSON object Record<checklistKey, boolean> — stored as TEXT for SQLite compatibility.
+  checklist String   @default("{}")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([siteId])
+}
+
+/// Time-bounded performance facts for a page (manual import or future API). CTR can be stored or derived in app.
+model ContentPerformanceSnapshot {
+  id              String   @id @default(cuid())
+  siteId          String
+  site            Site     @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  pageId          String
+  page            Page     @relation(fields: [pageId], references: [id], onDelete: Cascade)
+  periodStart     DateTime
+  periodEnd       DateTime
+  /// manual | gsc_import | ga4_import
+  source          String   @default("manual")
+  impressions     Int?
+  clicks          Int?
+  ctr             Float?
+  engagedSessions Int?
+  conversions     Int?
+  opportunityKey  String?
+  clusterKey      String?
+  rawPayload      Json?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@unique([pageId, periodStart, periodEnd, source])
+  @@index([siteId, periodEnd])
+  @@index([siteId, pageId])
+}
+
+/// Manual action queue for a site; created from completed audits (deterministic rules in lib/fix-tasks).
+model SiteFixTask {
+  id                 String   @id @default(cuid())
+  siteId             String
+  site               Site     @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  pageId             String
+  page               Page     @relation(fields: [pageId], references: [id], onDelete: Cascade)
+  /// Stable id from fix-plan (e.g. title_present:fail); dedupes open tasks per site.
+  dedupeKey          String
+  /// open | done
+  status             String   @default("open")
+  bucket             String
+  priorityScore      Int
+  title              String
+  detail             String?
+  sourceAuditRunId   String?
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  @@index([siteId, status])
+  @@index([siteId, dedupeKey, status])
+}
+
+model AuditRun {
+  id         String   @id @default(cuid())
+  pageId     String
+  page       Page     @relation(fields: [pageId], references: [id], onDelete: Cascade)
+  status     String
+  startedAt  DateTime @default(now())
+  finishedAt DateTime?
+  summary    String?
+
+  results AuditCheckResult[]
+}
+
+model AuditCheckResult {
+  id         String   @id @default(cuid())
+  auditRunId String
+  auditRun   AuditRun @relation(fields: [auditRunId], references: [id], onDelete: Cascade)
+  checkKey   String
+  status     String
+  message    String?
+  evidence   String?
+}
+
+model Trigger {
+  id              String    @id @default(cuid())
+  name            String
+  enabled         Boolean   @default(true)
+  intervalMinutes Int?
+  lastFiredAt     DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  tasks TriggerTask[]
+}
+
+model TriggerTask {
+  id          String    @id @default(cuid())
+  triggerId   String
+  trigger     Trigger   @relation(fields: [triggerId], references: [id], onDelete: Cascade)
+  status      String    @default("pending")
+  kind        String    @default("audit_page")
+  pageId      String?
+  page        Page?     @relation(fields: [pageId], references: [id], onDelete: SetNull)
+  title       String
+  createdAt   DateTime  @default(now())
+  completedAt DateTime?
+}

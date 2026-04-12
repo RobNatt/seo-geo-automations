@@ -1,0 +1,14 @@
+---
+description: SEO/GEO ops tool — scope, determinism, and delivery bar
+alwaysApply: true
+---
+
+# SEO/GEO Tool Rules
+
+- Ship only features that help onboard a real site, read an audit, or execute prioritized fixes.
+- Prefer deterministic rules, stored state, and explainable scoring.
+- Do not add AI-generated ranking or copy unless explicitly approved.
+- Keep changes small, reversible, and aligned with the current architecture.
+- If a feature does not improve onboarding, audit clarity, or execution speed, do not build it.
+- When implementing a milestone, stop after the smallest useful version is done.
+- Ask for confirmation before major refactors or schema changes.
