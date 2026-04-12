@@ -1,7 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { redirect } from "next/navigation";
+import { redirect, unstable_rethrow } from "next/navigation";
 import { prisma } from "@/lib/db";
 import { runPageAudit } from "@/lib/audits/run-page-audit";
 import { normalizeRootUrl } from "@/lib/onboarding/normalize-root-url";
@@ -97,7 +97,8 @@ export async function submitOnboarding(formData: FormData) {
     revalidatePath("/pages");
     revalidatePath("/services");
     redirect(`/sites/${siteId}?runId=${runId}`);
-  } catch {
+  } catch (error) {
+    unstable_rethrow(error);
     revalidatePath(`/sites/${siteId}`);
     revalidatePath("/sites");
     revalidatePath("/audits");
@@ -136,7 +137,8 @@ export async function rerunSiteAuditForm(formData: FormData) {
       redirect(`/sites?runId=${encodeURIComponent(runId)}&siteId=${encodeURIComponent(siteId)}`);
     }
     redirect(`/sites/${siteId}?runId=${runId}`);
-  } catch {
+  } catch (error) {
+    unstable_rethrow(error);
     if (backToList) {
       redirect(`/sites?msg=` + encodeURIComponent("Audit failed."));
     }
