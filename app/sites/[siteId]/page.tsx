@@ -71,6 +71,9 @@ import { isWhiteLabelSiteSummaryMode } from "@/lib/sites/whitelabel-site-summary
 
 export const dynamic = "force-dynamic";
 
+/** Vercel Pro+: raises the default ~10s cap so this data-heavy page can finish. Hobby tier still caps at 10s. */
+export const maxDuration = 60;
+
 export default async function SiteSummaryPage({
   params,
   searchParams,
@@ -87,44 +90,36 @@ export default async function SiteSummaryPage({
   if (!site) notFound();
 
   await ensureLaunchChecklistForSite(site.id);
-  const launchRows = await prisma.siteLaunchCheckItem.findMany({
-    where: { siteId: site.id },
-  });
+  const [launchRows, homepage] = await Promise.all([
+    prisma.siteLaunchCheckItem.findMany({
+      where: { siteId: site.id },
+    }),
+    prisma.page.findFirst({
+      where: { siteId: site.id },
+      orderBy: { createdAt: "asc" },
+    }),
+  ]);
   const launchItems = mergeLaunchChecklistRows(launchRows);
   const launchDone = launchItems.filter((i) => i.done).length;
   const launchTotal = LAUNCH_CHECKLIST_DEF.length;
   const launchPct = launchTotal ? Math.round((launchDone / launchTotal) * 100) : 0;
 
-  const homepage = await prisma.page.findFirst({
-    where: { siteId: site.id },
-    orderBy: { createdAt: "asc" },
-  });
-
-  const openFixTasks = sortOpenFixTasksByPriority(
-    homepage
-      ? await prisma.siteFixTask.findMany({
-          where: { siteId: site.id, status: "open" },
-        })
-      : [],
-  );
-
-  const openOpportunityFixKeys: string[] = [];
-  const openOpportunityContentKeys: string[] = [];
-  for (const t of openFixTasks) {
-    const parsed = tryParseOpportunityTaskDedupe(t.dedupeKey);
-    if (!parsed) continue;
-    if (parsed.kind === "fix") openOpportunityFixKeys.push(parsed.clusterKey);
-    else openOpportunityContentKeys.push(parsed.clusterKey);
-  }
-
+  let openFixTasks = sortOpenFixTasksByPriority([]);
   let latestRun = null;
   let run = null;
   if (homepage) {
-    latestRun = await prisma.auditRun.findFirst({
-      where: { pageId: homepage.id },
-      orderBy: { startedAt: "desc" },
-      include: { results: { orderBy: { checkKey: "asc" } } },
-    });
+    const [openTasksRaw, latestCandidate] = await Promise.all([
+      prisma.siteFixTask.findMany({
+        where: { siteId: site.id, status: "open" },
+      }),
+      prisma.auditRun.findFirst({
+        where: { pageId: homepage.id },
+        orderBy: { startedAt: "desc" },
+        include: { results: { orderBy: { checkKey: "asc" } } },
+      }),
+    ]);
+    openFixTasks = sortOpenFixTasksByPriority(openTasksRaw);
+    latestRun = latestCandidate;
     if (runIdParam) {
       const pinned = await prisma.auditRun.findFirst({
         where: { id: runIdParam, pageId: homepage.id },
@@ -134,6 +129,15 @@ export default async function SiteSummaryPage({
     } else {
       run = latestRun;
     }
+  }
+
+  const openOpportunityFixKeys: string[] = [];
+  const openOpportunityContentKeys: string[] = [];
+  for (const t of openFixTasks) {
+    const parsed = tryParseOpportunityTaskDedupe(t.dedupeKey);
+    if (!parsed) continue;
+    if (parsed.kind === "fix") openOpportunityFixKeys.push(parsed.clusterKey);
+    else openOpportunityContentKeys.push(parsed.clusterKey);
   }
 
   const launchRemainingLabels = launchItems.filter((i) => !i.done).map((i) => i.label);
@@ -258,7 +262,13 @@ export default async function SiteSummaryPage({
   });
   const growthOpportunities = limitGrowthOpportunities(growthOpportunitiesAll);
 
-  const [catalogServiceSlugs, globallyLinkedServiceSlugs, sitePagesForRules] = await Promise.all([
+  const [
+    catalogServiceSlugs,
+    globallyLinkedServiceSlugs,
+    sitePagesForRules,
+    writerBriefRows,
+    performanceDashboard,
+  ] = await Promise.all([
     prisma.service.findMany({ select: { slug: true }, orderBy: { slug: "asc" } }).then((rows) => rows.map((s) => s.slug)),
     prisma.service
       .findMany({
@@ -271,6 +281,8 @@ export default async function SiteSummaryPage({
       where: { siteId: site.id },
       select: { status: true, serviceId: true, service: { select: { slug: true } } },
     }),
+    loadWriterBriefsForSite(site.id),
+    loadContentPerformanceDashboard(site.id),
   ]);
 
   const siteLinkedServiceSlugs = [
@@ -299,9 +311,6 @@ export default async function SiteSummaryPage({
 
   const contentPlannerColumns = buildContentPlannerColumns(rankedContentGaps, ruleBasedContentFindings);
 
-  const writerBriefRows = await loadWriterBriefsForSite(site.id);
-
-  const performanceDashboard = await loadContentPerformanceDashboard(site.id);
   const siteReportSnapshot = await loadSiteReportSnapshot(site.id, { performanceDashboard });
   const reportTemplateTexts =
     siteReportSnapshot ?

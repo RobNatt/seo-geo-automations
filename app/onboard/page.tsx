@@ -2,6 +2,9 @@ import { submitOnboarding } from "@/app/actions/onboard";
 
 export const dynamic = "force-dynamic";
 
+/** Allows onboarding + audit server action to finish on Vercel Pro (Hobby remains ~10s cap). */
+export const maxDuration = 60;
+
 export default async function OnboardPage({
   searchParams,
 }: {
