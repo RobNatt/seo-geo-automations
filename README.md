@@ -1,39 +1,140 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with `[create-next-app](https://nextjs.org/docs/app/api-reference/cli/create-next-app)`.
+# N-Tech SEO/GEO Operations System
 
-## Getting Started
+A deterministic SEO and GEO operations app for onboarding sites, running audits, prioritizing fixes, tracking launch readiness, planning content, and generating client-ready reporting.
 
-First, run the development server:
+## Purpose
 
+This project is designed to help me run SEO and GEO like an operating system, not a collection of one-off tasks. It gives me a structured way to onboard new sites, audit what exists, identify what to fix next, and plan what to build for growth.
+
+The long-term goal is to turn this into a repeatable system I can use internally for my agency and eventually productize for clients.
+
+## What it does
+
+This app helps me:
+
+- Register a new site and homepage.
+- Run deterministic audits against the homepage.
+- Track onboarding stage and launch readiness.
+- Maintain a launch checklist.
+- Prioritize audit fixes.
+- Create and manage open fix tasks.
+- Identify content opportunities.
+- Prepare site launch reports.
+- Move from diagnosis to execution.
+
+## How it works
+
+The app is built around a simple workflow:
+
+1. Add a site.
+2. Run an initial audit.
+3. Review launch readiness.
+4. Review prioritized fixes.
+5. Complete launch checklist items.
+6. Plan content opportunities.
+7. Refresh and improve the site over time.
+
+The system is intentionally rule-based and deterministic. It uses stored state, audit results, and checklist data to guide decisions instead of trying to guess.
+
+## Core concepts
+
+### Site onboarding
+A site begins in an onboarding stage and moves through the system as audits run and launch items are completed.
+
+### Audit runs
+Homepage audits check the current site state and produce structured results that can be reviewed in the UI.
+
+### Launch checklist
+Each site has a fixed launch checklist that must be completed manually. Checklist items are not auto-marked complete.
+
+### Fix queue
+Failed audit checks can become open fix tasks. These tasks are deduplicated and tracked manually.
+
+### Content planning
+The system can identify content opportunities and help plan what should be published next for SEO and GEO growth.
+
+## UI/UX goals
+
+The interface should feel like an operations dashboard:
+
+- Clear.
+- Fast to scan.
+- Easy to understand.
+- Focused on next actions.
+- Useful without needing AI to interpret everything.
+
+The UI should help me answer:
+- What is the status?
+- What is broken?
+- What needs to be done next?
+- Is the site ready to launch?
+- What should be built next?
+
+## Local setup
+
+### Requirements
+- Node.js
+- npm or pnpm
+- PostgreSQL or SQLite, depending on the current setup
+- Prisma
+- Next.js
+
+### Install
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+npm install
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+### Environment variables
+Create a `.env` file and add the required database and app variables.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+### Database setup
+```bash
+npx prisma generate
+npx prisma db push
+```
 
-This project uses `[next/font](https://nextjs.org/docs/app/building-your-application/optimizing/fonts)` to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+### Run locally
+```bash
+npm run dev
+```
 
-## Learn More
+## Working with the app
 
-To learn more about Next.js, take a look at the following resources:
+### Add a new site
+Use the onboarding flow to register a site and generate its initial launch checklist.
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+### Run an audit
+Use the site detail page to run an audit and review the results.
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+### Review readiness
+Check the readiness summary to see whether the site is not ready, nearly ready, or ready.
 
-## Deploy on Vercel
+### Review fixes
+Use the prioritized fix list and open task queue to decide what to work on next.
 
-1. Import [this repo](https://github.com/RobNatt/seo-geo-automations) in the [Vercel dashboard](https://vercel.com/new) (framework: Next.js; leave defaults).
-2. Add environment variables from [`.env.example`](./.env.example). At minimum set **`DATABASE_URL`**.
+### Plan content
+Use the content opportunity planner to identify what the site should publish or improve next.
 
-**Database note:** This app uses **SQLite** via Prisma. A file-based DB on Vercel’s serverless runtime is **not durable** (each invocation may not share the same disk, and the filesystem is ephemeral). For a real production deployment, plan on **Postgres** (e.g. [Vercel Postgres](https://vercel.com/docs/storage/vercel-postgres) or [Neon](https://neon.tech)) or **Turso** (libSQL), then point `DATABASE_URL` at that service and adjust the Prisma provider/schema as needed. For a smoke-test deploy, you can still verify that the **build** succeeds with a placeholder `DATABASE_URL` if Prisma does not need a live DB at build time (this project runs `prisma generate` in `postinstall` / `build`).
+## Project philosophy
 
-See also: [Next.js deployment](https://nextjs.org/docs/app/building-your-application/deploying).
+This project is built on a few simple rules:
+
+- Deterministic first.
+- Manual confirmation for important state changes.
+- Stored state over hidden logic.
+- Clear priority over cleverness.
+- Useful on a real site before anything else.
+
+## Current status
+
+The core onboarding, audit, launch checklist, fix queue, readiness summary, and reporting views are in place. The next phase is testing the UI/UX and tightening the workflow so it feels great to use on a real site.
+
+## Roadmap
+
+Possible future improvements include:
+
+- Better content planning.
+- Refresh automation.
+- Client-facing reporting.
+- White-label portal views.
+- Productized service packaging.
