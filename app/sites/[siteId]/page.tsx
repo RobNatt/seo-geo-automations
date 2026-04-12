@@ -1,3 +1,4 @@
+import type { SiteFixTask } from "@prisma/client";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { setLaunchCheckItemForm } from "@/app/actions/launch-checklist";
@@ -104,7 +105,7 @@ export default async function SiteSummaryPage({
   const launchTotal = LAUNCH_CHECKLIST_DEF.length;
   const launchPct = launchTotal ? Math.round((launchDone / launchTotal) * 100) : 0;
 
-  let openFixTasks = sortOpenFixTasksByPriority([]);
+  let openFixTasks: SiteFixTask[] = [];
   let latestRun = null;
   let run = null;
   if (homepage) {
