@@ -3,7 +3,7 @@ import { OnboardForm } from "./OnboardForm";
 
 export const dynamic = "force-dynamic";
 
-/** Allows onboarding + audit server action to finish on Vercel Pro (Hobby remains ~10s cap). */
+/** Allows onboarding POST handler + audit to finish on Vercel Pro (Hobby remains ~10s cap). */
 export const maxDuration = 60;
 
 export default async function OnboardPage({
