@@ -7,41 +7,34 @@ import { PrismaClient } from "@prisma/client";
 const globalForPrisma = globalThis as unknown as { prisma: PrismaClient | undefined };
 
 /**
- * Prisma schema uses `env("DATABASE_URL")` — that name is case-sensitive.
- * Vercel must use exactly `DATABASE_URL`. We also accept `database_url` and trim whitespace
- * so a mis-cased or padded env var still works.
+ * Prisma reads `env("DATABASE_URL")` from schema. Vercel Postgres often injects `POSTGRES_PRISMA_URL`
+ * (pooled); we normalize so Prisma always sees `DATABASE_URL`.
  */
 function ensureDatabaseUrlForPrisma(): void {
   const trimmed =
     process.env.DATABASE_URL?.trim() ||
+    process.env.POSTGRES_PRISMA_URL?.trim() ||
+    process.env.POSTGRES_URL?.trim() ||
     process.env.database_url?.trim();
   if (trimmed) {
     process.env.DATABASE_URL = trimmed;
   }
 }
 
-function assertSqliteDatasourceUrl(url: string | undefined): void {
-  if (!url) return;
+function assertDatabaseUrlSafeOnVercel(url: string | undefined): void {
+  if (!url || !process.env.VERCEL) return;
   const lower = url.toLowerCase();
-  if (process.env.VERCEL && lower.startsWith("file:")) {
+  if (lower.startsWith("file:")) {
     throw new Error(
-      "DATABASE_URL uses a file: SQLite path. Vercel’s serverless filesystem cannot open that database reliably " +
-        "(SQLite error 14: unable to open database file). Use a hosted database: switch Prisma to " +
-        "provider = \"postgresql\" with Neon/Vercel Postgres and run prisma db push, or use Turso with Prisma’s libSQL setup.",
-    );
-  }
-  if (lower.startsWith("postgres://") || lower.startsWith("postgresql://")) {
-    throw new Error(
-      "DATABASE_URL is a Postgres connection string, but prisma/schema.prisma still has provider = \"sqlite\". " +
-        "Either switch the datasource to provider = \"postgresql\" and run `npx prisma db push` against that database, " +
-        "or use a SQLite file/libSQL setup that matches the current schema.",
+      "DATABASE_URL uses a file: path. On Vercel use your Vercel Postgres / Neon URL (postgres:// or postgresql://), " +
+        "then run `npx prisma db push` against that database and redeploy.",
     );
   }
 }
 
 function createPrismaClient(): PrismaClient {
   ensureDatabaseUrlForPrisma();
-  assertSqliteDatasourceUrl(process.env.DATABASE_URL);
+  assertDatabaseUrlSafeOnVercel(process.env.DATABASE_URL);
   const client = new PrismaClient({
     log: process.env.NODE_ENV === "development" ? ["error", "warn"] : ["error"],
   });

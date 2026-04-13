@@ -1,15 +1,12 @@
-"use client";
-
-import { submitOnboarding } from "@/app/actions/onboard";
-
 /**
- * Client form so GET /onboard does not import the server action module (and Prisma) in the RSC graph.
- * The action still runs only on the server when submitted.
+ * POST to a Route Handler instead of a Server Action so GET /onboard never triggers Next.js
+ * server-action cookie setup during RSC (which throws: cookies only modifiable in actions / route handlers).
  */
 export function OnboardForm() {
   return (
     <form
-      action={submitOnboarding}
+      action="/api/onboard"
+      method="post"
       className="mt-8 space-y-4 rounded-lg border border-zinc-200 bg-white p-6 dark:border-zinc-800 dark:bg-zinc-900"
     >
       <label className="flex flex-col gap-1 text-sm">

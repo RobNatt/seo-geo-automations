@@ -2,13 +2,19 @@
  * Short ?err= codes for onboarding failures (avoid cookies and long query strings on Vercel).
  */
 
+/** Next.js may pass duplicate keys as `string[]`; normalize for lookups and rendering. */
+export function firstQueryString(v: string | string[] | undefined): string | undefined {
+  if (v == null) return undefined;
+  return Array.isArray(v) ? v[0] : v;
+}
+
 export const ONBOARD_ERR_USER_MESSAGES: Record<string, string> = {
   missing_database_url:
     "Add DATABASE_URL in Vercel → Project → Settings → Environment Variables (enable it for Production), then redeploy.",
   sqlite_file_vercel:
     "DATABASE_URL points at a file: SQLite database. Vercel cannot use that reliably. Use Postgres (Neon or Vercel Postgres: set Prisma to provider = \"postgresql\" and run npx prisma db push) or Turso with Prisma’s libSQL setup.",
   postgres_schema_sqlite:
-    "DATABASE_URL is for Postgres, but prisma/schema.prisma still uses provider = \"sqlite\". Switch the datasource to postgresql and run npx prisma db push against your database.",
+    "Database URL and Prisma schema are out of sync (e.g. Postgres URL with a non-Postgres schema). Ensure prisma/schema.prisma uses provider = \"postgresql\" and run npx prisma db push, then redeploy.",
   onboard_failed:
     "Something went wrong while onboarding. Open this deployment’s Vercel Logs and search for prisma: or Error for details.",
 };

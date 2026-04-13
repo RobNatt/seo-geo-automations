@@ -3,7 +3,7 @@ generator client {
 }
 
 datasource db {
-  provider = "sqlite"
+  provider = "postgresql"
   url      = env("DATABASE_URL")
 }
 
@@ -166,7 +166,7 @@ model PageRefreshWorkflow {
   site      Site     @relation(fields: [siteId], references: [id], onDelete: Cascade)
   pageId    String   @unique
   page      Page     @relation(fields: [pageId], references: [id], onDelete: Cascade)
-  /// JSON object Record<checklistKey, boolean> — stored as TEXT for SQLite compatibility.
+  /// JSON object Record<checklistKey, boolean> — stored as text/JSON in Postgres.
   checklist String   @default("{}")
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

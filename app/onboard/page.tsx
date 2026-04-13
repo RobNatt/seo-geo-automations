@@ -1,4 +1,4 @@
-import { messageForOnboardErrCode } from "@/lib/onboard-error-codes";
+import { firstQueryString, messageForOnboardErrCode } from "@/lib/onboard-error-codes";
 import { OnboardForm } from "./OnboardForm";
 
 export const dynamic = "force-dynamic";
@@ -9,9 +9,11 @@ export const maxDuration = 60;
 export default async function OnboardPage({
   searchParams,
 }: {
-  searchParams: Promise<{ msg?: string; err?: string }>;
+  searchParams: Promise<{ msg?: string | string[]; err?: string | string[] }>;
 }) {
-  const { msg: queryMsg, err } = await searchParams;
+  const sp = await searchParams;
+  const queryMsg = firstQueryString(sp.msg);
+  const err = firstQueryString(sp.err);
   const errMsg = messageForOnboardErrCode(err);
   const msg = queryMsg ?? errMsg;
 
