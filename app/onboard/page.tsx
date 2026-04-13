@@ -1,3 +1,4 @@
+import { consumeOnboardFlash } from "@/lib/onboard-flash";
 import { OnboardForm } from "./OnboardForm";
 
 export const dynamic = "force-dynamic";
@@ -10,7 +11,9 @@ export default async function OnboardPage({
 }: {
   searchParams: Promise<{ msg?: string }>;
 }) {
-  const { msg } = await searchParams;
+  const { msg: queryMsg } = await searchParams;
+  const flashMsg = await consumeOnboardFlash();
+  const msg = queryMsg ?? flashMsg;
 
   return (
     <main className="mx-auto max-w-2xl px-4 py-10">

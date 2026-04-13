@@ -5,6 +5,7 @@ import { redirect, unstable_rethrow } from "next/navigation";
 import { prisma } from "@/lib/db";
 import { runPageAudit } from "@/lib/audits/run-page-audit";
 import { normalizeRootUrl } from "@/lib/onboarding/normalize-root-url";
+import { setOnboardFlashError } from "@/lib/onboard-flash";
 import { LAUNCH_CHECKLIST_DEF } from "@/lib/sites/launch-checklist";
 
 function slugify(input: string) {
@@ -20,6 +21,12 @@ function onboardingErrorMessage(error: unknown): string {
   const raw = error instanceof Error ? error.message : String(error);
   const oneLine = raw.replace(/[\r\n]+/g, " ").trim();
   return oneLine.length > 450 ? `${oneLine.slice(0, 447)}…` : oneLine;
+}
+
+function onboardingFatalFlashText(error: unknown): string {
+  const raw = error instanceof Error ? error.message : String(error);
+  const oneLine = raw.replace(/[\r\n]+/g, " ").trim();
+  return `Onboarding failed. In Vercel: Project → Settings → Environment Variables → add DATABASE_URL (hosted DB, not file: SQLite). ${oneLine}`;
 }
 
 async function submitOnboardingInner(formData: FormData) {
@@ -122,12 +129,8 @@ export async function submitOnboarding(formData: FormData) {
     await submitOnboardingInner(formData);
   } catch (error) {
     unstable_rethrow(error);
-    redirect(
-      "/onboard?msg=" +
-        encodeURIComponent(
-          `Onboarding failed. On Vercel, use a hosted DATABASE_URL (not file: SQLite). Details: ${onboardingErrorMessage(error)}`,
-        ),
-    );
+    await setOnboardFlashError(onboardingFatalFlashText(error));
+    redirect("/onboard");
   }
 }
 
