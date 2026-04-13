@@ -23,6 +23,13 @@ function ensureDatabaseUrlForPrisma(): void {
 function assertSqliteDatasourceUrl(url: string | undefined): void {
   if (!url) return;
   const lower = url.toLowerCase();
+  if (process.env.VERCEL && lower.startsWith("file:")) {
+    throw new Error(
+      "DATABASE_URL uses a file: SQLite path. Vercel’s serverless filesystem cannot open that database reliably " +
+        "(SQLite error 14: unable to open database file). Use a hosted database: switch Prisma to " +
+        "provider = \"postgresql\" with Neon/Vercel Postgres and run prisma db push, or use Turso with Prisma’s libSQL setup.",
+    );
+  }
   if (lower.startsWith("postgres://") || lower.startsWith("postgresql://")) {
     throw new Error(
       "DATABASE_URL is a Postgres connection string, but prisma/schema.prisma still has provider = \"sqlite\". " +

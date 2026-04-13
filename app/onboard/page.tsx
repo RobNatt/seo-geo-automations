@@ -1,4 +1,5 @@
-import { consumeOnboardFlash } from "@/lib/onboard-flash";
+import { getOnboardFlashMessage } from "@/lib/onboard-flash";
+import { OnboardFlashClear } from "./OnboardFlashClear";
 import { OnboardForm } from "./OnboardForm";
 
 export const dynamic = "force-dynamic";
@@ -12,8 +13,9 @@ export default async function OnboardPage({
   searchParams: Promise<{ msg?: string }>;
 }) {
   const { msg: queryMsg } = await searchParams;
-  const flashMsg = await consumeOnboardFlash();
+  const flashMsg = await getOnboardFlashMessage();
   const msg = queryMsg ?? flashMsg;
+  const hadCookieFlash = flashMsg != null;
 
   return (
     <main className="mx-auto max-w-2xl px-4 py-10">
@@ -28,6 +30,7 @@ export default async function OnboardPage({
         </p>
       ) : null}
 
+      <OnboardFlashClear hadCookieFlash={hadCookieFlash} />
       <OnboardForm />
     </main>
   );
