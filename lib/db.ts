@@ -6,7 +6,22 @@ import { PrismaClient } from "@prisma/client";
 
 const globalForPrisma = globalThis as unknown as { prisma: PrismaClient | undefined };
 
+/**
+ * Prisma schema uses `env("DATABASE_URL")` — that name is case-sensitive.
+ * Vercel must use exactly `DATABASE_URL`. We also accept `database_url` and trim whitespace
+ * so a mis-cased or padded env var still works.
+ */
+function ensureDatabaseUrlForPrisma(): void {
+  const trimmed =
+    process.env.DATABASE_URL?.trim() ||
+    process.env.database_url?.trim();
+  if (trimmed) {
+    process.env.DATABASE_URL = trimmed;
+  }
+}
+
 function createPrismaClient(): PrismaClient {
+  ensureDatabaseUrlForPrisma();
   const client = new PrismaClient({
     log: process.env.NODE_ENV === "development" ? ["error", "warn"] : ["error"],
   });
