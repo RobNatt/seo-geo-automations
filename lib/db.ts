@@ -20,8 +20,21 @@ function ensureDatabaseUrlForPrisma(): void {
   }
 }
 
+function assertSqliteDatasourceUrl(url: string | undefined): void {
+  if (!url) return;
+  const lower = url.toLowerCase();
+  if (lower.startsWith("postgres://") || lower.startsWith("postgresql://")) {
+    throw new Error(
+      "DATABASE_URL is a Postgres connection string, but prisma/schema.prisma still has provider = \"sqlite\". " +
+        "Either switch the datasource to provider = \"postgresql\" and run `npx prisma db push` against that database, " +
+        "or use a SQLite file/libSQL setup that matches the current schema.",
+    );
+  }
+}
+
 function createPrismaClient(): PrismaClient {
   ensureDatabaseUrlForPrisma();
+  assertSqliteDatasourceUrl(process.env.DATABASE_URL);
   const client = new PrismaClient({
     log: process.env.NODE_ENV === "development" ? ["error", "warn"] : ["error"],
   });
