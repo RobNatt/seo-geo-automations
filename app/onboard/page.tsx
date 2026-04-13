@@ -1,5 +1,4 @@
-import { getOnboardFlashMessage } from "@/lib/onboard-flash";
-import { OnboardFlashClear } from "./OnboardFlashClear";
+import { messageForOnboardErrCode } from "@/lib/onboard-error-codes";
 import { OnboardForm } from "./OnboardForm";
 
 export const dynamic = "force-dynamic";
@@ -10,12 +9,11 @@ export const maxDuration = 60;
 export default async function OnboardPage({
   searchParams,
 }: {
-  searchParams: Promise<{ msg?: string }>;
+  searchParams: Promise<{ msg?: string; err?: string }>;
 }) {
-  const { msg: queryMsg } = await searchParams;
-  const flashMsg = await getOnboardFlashMessage();
-  const msg = queryMsg ?? flashMsg;
-  const hadCookieFlash = flashMsg != null;
+  const { msg: queryMsg, err } = await searchParams;
+  const errMsg = messageForOnboardErrCode(err);
+  const msg = queryMsg ?? errMsg;
 
   return (
     <main className="mx-auto max-w-2xl px-4 py-10">
@@ -30,7 +28,6 @@ export default async function OnboardPage({
         </p>
       ) : null}
 
-      <OnboardFlashClear hadCookieFlash={hadCookieFlash} />
       <OnboardForm />
     </main>
   );

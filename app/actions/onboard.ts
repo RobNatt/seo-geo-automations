@@ -5,7 +5,7 @@ import { redirect, unstable_rethrow } from "next/navigation";
 import { prisma } from "@/lib/db";
 import { runPageAudit } from "@/lib/audits/run-page-audit";
 import { normalizeRootUrl } from "@/lib/onboarding/normalize-root-url";
-import { setOnboardFlashError } from "@/lib/onboard-flash";
+import { onboardFailureErrCode } from "@/lib/onboard-error-codes";
 import { LAUNCH_CHECKLIST_DEF } from "@/lib/sites/launch-checklist";
 
 function slugify(input: string) {
@@ -129,8 +129,7 @@ export async function submitOnboarding(formData: FormData) {
     await submitOnboardingInner(formData);
   } catch (error) {
     unstable_rethrow(error);
-    await setOnboardFlashError(onboardingFatalFlashText(error));
-    redirect("/onboard");
+    redirect("/onboard?err=" + encodeURIComponent(onboardFailureErrCode(error)));
   }
 }
 
