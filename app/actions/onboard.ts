@@ -16,7 +16,13 @@ function slugify(input: string) {
   return s || "service";
 }
 
-export async function submitOnboarding(formData: FormData) {
+function onboardingErrorMessage(error: unknown): string {
+  const raw = error instanceof Error ? error.message : String(error);
+  const oneLine = raw.replace(/[\r\n]+/g, " ").trim();
+  return oneLine.length > 450 ? `${oneLine.slice(0, 447)}…` : oneLine;
+}
+
+async function submitOnboardingInner(formData: FormData) {
   const businessName = String(formData.get("businessName") ?? "").trim();
   const rawUrl = String(formData.get("rootUrl") ?? "").trim();
   const geoHint = String(formData.get("geoHint") ?? "").trim() || null;
@@ -111,7 +117,21 @@ export async function submitOnboarding(formData: FormData) {
   }
 }
 
-export async function rerunSiteAuditForm(formData: FormData) {
+export async function submitOnboarding(formData: FormData) {
+  try {
+    await submitOnboardingInner(formData);
+  } catch (error) {
+    unstable_rethrow(error);
+    redirect(
+      "/onboard?msg=" +
+        encodeURIComponent(
+          `Onboarding failed. On Vercel, use a hosted DATABASE_URL (not file: SQLite). Details: ${onboardingErrorMessage(error)}`,
+        ),
+    );
+  }
+}
+
+async function rerunSiteAuditFormInner(formData: FormData) {
   const siteId = String(formData.get("siteId") ?? "").trim();
   if (!siteId) return;
 
@@ -143,5 +163,14 @@ export async function rerunSiteAuditForm(formData: FormData) {
       redirect(`/sites?msg=` + encodeURIComponent("Audit failed."));
     }
     redirect(`/sites/${siteId}?msg=` + encodeURIComponent("Audit failed."));
+  }
+}
+
+export async function rerunSiteAuditForm(formData: FormData) {
+  try {
+    await rerunSiteAuditFormInner(formData);
+  } catch (error) {
+    unstable_rethrow(error);
+    redirect("/sites?msg=" + encodeURIComponent(`Audit request failed. ${onboardingErrorMessage(error)}`));
   }
 }
