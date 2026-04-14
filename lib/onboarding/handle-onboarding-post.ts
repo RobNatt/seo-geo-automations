@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { revalidatePath } from "next/cache";
 import { unstable_rethrow } from "next/navigation";
+import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { runPageAudit } from "@/lib/audits/run-page-audit";
 import { normalizeRootUrl } from "@/lib/onboarding/normalize-root-url";
@@ -18,6 +19,24 @@ function slugify(input: string) {
 
 function redirect(originUrl: string, pathWithQuery: string) {
   return NextResponse.redirect(new URL(pathWithQuery, originUrl), 303);
+}
+
+function isUniqueConstraintError(error: unknown): error is Prisma.PrismaClientKnownRequestError {
+  return error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002";
+}
+
+async function findExistingSiteIdForRootUrl(rootUrl: string): Promise<string | null> {
+  const bySite = await prisma.site.findUnique({
+    where: { rootUrl },
+    select: { id: true },
+  });
+  if (bySite) return bySite.id;
+
+  const byPage = await prisma.page.findUnique({
+    where: { url: rootUrl },
+    select: { siteId: true },
+  });
+  return byPage?.siteId ?? null;
 }
 
 async function submitOnboardingFromFormData(formData: FormData, originUrl: string): Promise<NextResponse> {
@@ -86,7 +105,17 @@ async function submitOnboardingFromFormData(formData: FormData, originUrl: strin
     });
     siteId = out.site.id;
     pageId = out.page.id;
-  } catch {
+  } catch (error) {
+    if (isUniqueConstraintError(error)) {
+      const existingSiteId = await findExistingSiteIdForRootUrl(rootUrl);
+      if (existingSiteId) {
+        return redirect(
+          originUrl,
+          `/sites/${existingSiteId}?msg=` +
+            encodeURIComponent("This URL is already onboarded. Opened the existing site instead."),
+        );
+      }
+    }
     return redirect(
       originUrl,
       "/onboard?msg=" +
