@@ -98,7 +98,7 @@ import { buildSiteBriefFromSite } from "@/lib/site-brief";
 import { scoreColor, isOlderThanDays } from "@/lib/sites/performance-audit";
 import { buildPerformanceGuidance } from "@/lib/sites/performance-guidance";
 import { MAINTENANCE_TRIGGER_COPY } from "@/lib/maintenance-rules";
-import { ensurePartnershipChecklistForSite } from "@/lib/partnerships";
+import { ensurePartnershipChecklistForSite, listPartnershipsSafe } from "@/lib/partnerships";
 
 export const dynamic = "force-dynamic";
 
@@ -211,10 +211,7 @@ export default async function SiteSummaryPage({
       orderBy: [{ priority: "asc" }, { createdAt: "desc" }],
       take: 3,
     }),
-    prisma.partnership.findMany({
-      where: { siteId: site.id },
-      orderBy: [{ type: "asc" }, { partnerName: "asc" }],
-    }),
+    listPartnershipsSafe(site.id),
   ]);
   const dueThisWeek = dueThisWeekRaw.slice(0, 3);
   const dueThisMonth = dueThisMonthRaw.slice(0, 5);

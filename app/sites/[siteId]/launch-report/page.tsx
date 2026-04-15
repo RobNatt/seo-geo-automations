@@ -32,6 +32,7 @@ import {
   partitionContentRefreshByTier,
 } from "@/lib/sites/content-refresh-rank";
 import { loadContentPerformanceDashboard } from "@/lib/sites/load-content-performance-dashboard";
+import { listPartnershipsSafe } from "@/lib/partnerships";
 
 export const dynamic = "force-dynamic";
 
@@ -134,10 +135,7 @@ export default async function SiteLaunchReportPage({ params }: { params: Promise
     prisma.contentOpportunity.count({
       where: { siteId: site.id, status: { in: ["identified", "planned", "active"] } },
     }),
-    prisma.partnership.findMany({
-      where: { siteId: site.id },
-      select: { status: true },
-    }),
+    listPartnershipsSafe(site.id),
   ]);
   const partnershipsInProgress = partnershipRows.filter((p) => p.status === "in_progress").length;
   const partnershipsDone = partnershipRows.filter((p) => p.status === "done").length;

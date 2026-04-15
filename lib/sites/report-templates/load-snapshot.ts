@@ -16,6 +16,7 @@ import { loadContentPerformanceDashboard } from "@/lib/sites/load-content-perfor
 import type { ContentPerformanceDashboard } from "@/lib/sites/load-content-performance-dashboard";
 import { listPromptClusterPlannerRows } from "@/lib/sites/prompt-clusters";
 import { sortOpenFixTasksByPriority } from "@/lib/fix-tasks/open-task-priority";
+import { listPartnershipsSafe } from "@/lib/partnerships";
 import { previousMonthRangeUtc } from "./month-window";
 
 import type { SiteReportSnapshot } from "./types";
@@ -143,10 +144,7 @@ export async function loadSiteReportSnapshot(
       prisma.growthTask.count({ where: { siteId: site.id, status: "done", completedAt: { gte: start, lte: end } } }),
       prisma.contentOpportunity.count({ where: { siteId: site.id, status: { in: ["identified", "planned", "active"] } } }),
       prisma.contentOpportunity.count({ where: { siteId: site.id, status: "done", updatedAt: { gte: start, lte: end } } }),
-      prisma.partnership.findMany({
-        where: { siteId: site.id },
-        select: { status: true, lastActivity: true },
-      }),
+      listPartnershipsSafe(site.id),
     ]);
 
   const partnershipDoneCount = partnershipRows.filter((r) => r.status === "done").length;

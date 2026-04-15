@@ -1,3 +1,4 @@
+import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
 
 export const PARTNERSHIP_STATUS = ["not_started", "in_progress", "done"] as const;
@@ -41,23 +42,54 @@ export const PARTNERSHIP_CHECKLIST = [
   },
 ] as const;
 
+function isMissingPartnershipTableError(error: unknown): boolean {
+  return (
+    error instanceof Prisma.PrismaClientKnownRequestError &&
+    error.code === "P2021" &&
+    error.meta?.modelName === "Partnership"
+  );
+}
+
+export async function listPartnershipsSafe(siteId: string) {
+  try {
+    return await prisma.partnership.findMany({
+      where: { siteId },
+      orderBy: [{ type: "asc" }, { partnerName: "asc" }],
+    });
+  } catch (error) {
+    if (isMissingPartnershipTableError(error)) return [];
+    throw error;
+  }
+}
+
 export async function ensurePartnershipChecklistForSite(siteId: string) {
-  const existing = await prisma.partnership.findMany({
-    where: { siteId },
-    select: { type: true, partnerName: true },
-  });
+  let existing: { type: string; partnerName: string }[] = [];
+  try {
+    existing = await prisma.partnership.findMany({
+      where: { siteId },
+      select: { type: true, partnerName: true },
+    });
+  } catch (error) {
+    if (isMissingPartnershipTableError(error)) return;
+    throw error;
+  }
   const have = new Set(existing.map((e) => `${e.type}::${e.partnerName}`));
   const missing = PARTNERSHIP_CHECKLIST.filter((row) => !have.has(`${row.type}::${row.partnerName}`));
   if (missing.length === 0) return;
 
-  await prisma.partnership.createMany({
-    data: missing.map((row) => ({
-      siteId,
-      type: row.type,
-      partnerName: row.partnerName,
-      status: "not_started",
-      nextAction: row.defaultNextAction,
-      notes: "",
-    })),
-  });
+  try {
+    await prisma.partnership.createMany({
+      data: missing.map((row) => ({
+        siteId,
+        type: row.type,
+        partnerName: row.partnerName,
+        status: "not_started",
+        nextAction: row.defaultNextAction,
+        notes: "",
+      })),
+    });
+  } catch (error) {
+    if (isMissingPartnershipTableError(error)) return;
+    throw error;
+  }
 }
