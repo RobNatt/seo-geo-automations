@@ -10,6 +10,7 @@ import {
   type OpportunityTaskKind,
 } from "@/lib/fix-tasks/opportunity-task";
 import { prisma } from "@/lib/db";
+import { appendSearchParams, focusTokenFromFormData } from "@/lib/navigation/post-action-focus";
 import { rankContentGapOpportunities, shortOpportunityRecommendation } from "@/lib/sites/content-gap-rank";
 import { listPromptClusterPlannerRows } from "@/lib/sites/prompt-clusters";
 
@@ -51,7 +52,9 @@ export async function createFixTaskFromCheckForm(formData: FormData) {
   });
   if (existing) {
     redirect(
-      `/sites/${siteId}?msg=${encodeURIComponent("That issue is already on your open fix task list.")}`,
+      appendSearchParams(`/sites/${siteId}?msg=${encodeURIComponent("That issue is already on your open fix task list.")}`, {
+        focus: "open-fix-tasks",
+      }),
     );
   }
 
@@ -71,7 +74,12 @@ export async function createFixTaskFromCheckForm(formData: FormData) {
 
   revalidatePath(`/sites/${siteId}`);
   revalidatePath("/sites");
-  redirect(`/sites/${siteId}?msg=${encodeURIComponent("Added to open fix tasks.")}`);
+  const focus = focusTokenFromFormData(formData) ?? "open-fix-tasks";
+  redirect(
+    appendSearchParams(`/sites/${siteId}?msg=${encodeURIComponent("Added to open fix tasks.")}`, {
+      focus,
+    }),
+  );
 }
 
 export async function completeSiteFixTaskForm(formData: FormData) {
@@ -91,7 +99,8 @@ export async function completeSiteFixTaskForm(formData: FormData) {
 
   revalidatePath(`/sites/${siteId}`);
   revalidatePath("/sites");
-  redirect(`/sites/${siteId}`);
+  const focus = focusTokenFromFormData(formData);
+  redirect(appendSearchParams(`/sites/${siteId}`, focus ? { focus } : {}));
 }
 
 export async function createOpportunityTaskForm(formData: FormData) {
@@ -111,9 +120,12 @@ export async function createOpportunityTaskForm(formData: FormData) {
   });
   if (duplicate) {
     redirect(
-      `/sites/${siteId}?msg=${encodeURIComponent(
-        `An open ${kind} task for opportunity “${clusterKey}” already exists.`,
-      )}#open-fix-tasks`,
+      appendSearchParams(
+        `/sites/${siteId}?msg=${encodeURIComponent(
+          `An open ${kind} task for opportunity “${clusterKey}” already exists.`,
+        )}`,
+        { focus: "open-fix-tasks" },
+      ),
     );
   }
 
@@ -176,6 +188,8 @@ export async function createOpportunityTaskForm(formData: FormData) {
   revalidatePath(`/sites/${siteId}`);
   revalidatePath("/sites");
   redirect(
-    `/sites/${siteId}?msg=${encodeURIComponent(`Added ${kind} task from opportunity.`)}#open-fix-tasks`,
+    appendSearchParams(`/sites/${siteId}?msg=${encodeURIComponent(`Added ${kind} task from opportunity.`)}`, {
+      focus: "open-fix-tasks",
+    }),
   );
 }

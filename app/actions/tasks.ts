@@ -1,6 +1,8 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { redirect } from "next/navigation";
+import { appendSearchParams } from "@/lib/navigation/post-action-focus";
 import { prisma } from "@/lib/db";
 import { runPageAudit } from "@/lib/audits/run-page-audit";
 import { enqueueDueTriggerTasks } from "@/lib/triggers/process-due";
@@ -61,19 +63,26 @@ export async function runAuditTask(taskId: string) {
 
 export async function processDueTriggersForm() {
   await processDueTriggers();
+  redirect(appendSearchParams("/tasks", { focus: "task-queue" }));
 }
 
 export async function enqueueTriggerNowForm(formData: FormData) {
   const id = String(formData.get("triggerId") ?? "");
-  if (id) await enqueueTriggerNow(id);
+  if (!id) return;
+  await enqueueTriggerNow(id);
+  redirect(appendSearchParams("/tasks", { focus: "task-queue" }));
 }
 
 export async function runAuditTaskForm(formData: FormData) {
   const id = String(formData.get("taskId") ?? "");
-  if (id) await runAuditTask(id);
+  if (!id) return;
+  await runAuditTask(id);
+  redirect(appendSearchParams("/tasks", { focus: "task-queue" }));
 }
 
 export async function completeTaskForm(formData: FormData) {
   const id = String(formData.get("taskId") ?? "");
-  if (id) await completeTask(id);
+  if (!id) return;
+  await completeTask(id);
+  redirect(appendSearchParams("/tasks", { focus: "task-queue" }));
 }

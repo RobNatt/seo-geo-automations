@@ -1,6 +1,7 @@
 import type { SiteFixTask } from "@prisma/client";
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { Suspense } from "react";
 import { setLaunchCheckItemForm } from "@/app/actions/launch-checklist";
 import {
   completeSiteFixTaskForm,
@@ -17,6 +18,7 @@ import { ContentOpportunityRulesSection } from "@/components/ContentOpportunityR
 import { GrowthPipelineSection } from "@/components/GrowthPipelineSection";
 import { FixTaskOpenLink } from "@/components/FixTaskOpenLink";
 import { FixRecommendations } from "@/components/FixRecommendations";
+import { PostActionScrollFocus } from "@/components/PostActionScrollFocus";
 import { LaunchBlockersSection } from "@/components/LaunchBlockersSection";
 import { prisma } from "@/lib/db";
 import {
@@ -353,6 +355,9 @@ export default async function SiteSummaryPage({
 
   return (
     <main className="mx-auto max-w-5xl px-4 py-10">
+      <Suspense fallback={null}>
+        <PostActionScrollFocus variant="site" />
+      </Suspense>
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <h1 className="text-xl font-semibold">{site.businessName}</h1>
@@ -554,7 +559,10 @@ export default async function SiteSummaryPage({
         ) : null}
       </section>
 
-      <section className="mt-8 rounded-lg border border-zinc-200 bg-white p-5 dark:border-zinc-800 dark:bg-zinc-900">
+      <section
+        id="launch-checklist"
+        className="mt-8 scroll-mt-8 rounded-lg border border-zinc-200 bg-white p-5 dark:border-zinc-800 dark:bg-zinc-900"
+      >
         <h2 className="text-sm font-medium text-zinc-800 dark:text-zinc-100">Go-live checklist</h2>
         <p className="mt-1 text-xs text-zinc-500">
           Manual confirmations (stored on this site). Not inferred from audits.
@@ -583,6 +591,7 @@ export default async function SiteSummaryPage({
                 <input type="hidden" name="siteId" value={site.id} />
                 <input type="hidden" name="key" value={item.key} />
                 <input type="hidden" name="done" value={item.done ? "false" : "true"} />
+                <input type="hidden" name="scrollTo" value="launch-checklist" />
                 <button
                   type="submit"
                   className="rounded border border-zinc-300 px-3 py-1 text-xs font-medium dark:border-zinc-600"
@@ -648,6 +657,7 @@ export default async function SiteSummaryPage({
                             <form action={completeSiteFixTaskForm} className="mt-3">
                               <input type="hidden" name="taskId" value={t.id} />
                               <input type="hidden" name="siteId" value={site.id} />
+                              <input type="hidden" name="scrollTo" value={`open-fix-task:${t.id}`} />
                               <button
                                 type="submit"
                                 className="rounded border border-zinc-300 px-3 py-1.5 text-xs font-medium dark:border-zinc-600"
@@ -774,6 +784,7 @@ export default async function SiteSummaryPage({
                               <form action={createFixTaskFromCheckForm}>
                                 <input type="hidden" name="siteId" value={site.id} />
                                 <input type="hidden" name="checkResultId" value={r.id} />
+                                <input type="hidden" name="scrollTo" value="check-results" />
                                 <button
                                   type="submit"
                                   className="whitespace-nowrap rounded border border-zinc-300 px-2 py-1 text-xs font-medium dark:border-zinc-600"

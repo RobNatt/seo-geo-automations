@@ -1,3 +1,4 @@
+import { Suspense } from "react";
 import { prisma } from "@/lib/db";
 import {
   completeTaskForm,
@@ -5,6 +6,7 @@ import {
   processDueTriggersForm,
   runAuditTaskForm,
 } from "@/app/actions/tasks";
+import { PostActionScrollFocus } from "@/components/PostActionScrollFocus";
 
 export const dynamic = "force-dynamic";
 
@@ -27,6 +29,9 @@ export default async function TriggerTasksPage() {
 
   return (
     <main className="mx-auto max-w-5xl px-4 py-10">
+      <Suspense fallback={null}>
+        <PostActionScrollFocus variant="tasks" />
+      </Suspense>
       <h1 className="text-xl font-semibold">Trigger tasks</h1>
       <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">
         Tasks are created when a scheduled trigger is due, or when you enqueue manually. Running a task performs the page audit.
@@ -73,7 +78,7 @@ export default async function TriggerTasksPage() {
         </form>
       </section>
 
-      <section className="mt-8">
+      <section id="task-queue" className="mt-8 scroll-mt-8">
         <h2 className="text-sm font-medium text-zinc-700 dark:text-zinc-300">Task queue</h2>
         <div className="mt-3 overflow-x-auto rounded-lg border border-zinc-200 dark:border-zinc-800">
           <table className="w-full min-w-[640px] text-left text-sm">

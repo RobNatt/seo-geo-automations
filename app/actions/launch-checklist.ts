@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { prisma } from "@/lib/db";
+import { appendSearchParams, focusTokenFromFormData } from "@/lib/navigation/post-action-focus";
 import { isLaunchChecklistKey } from "@/lib/sites/launch-checklist";
 
 export async function setLaunchCheckItemForm(formData: FormData) {
@@ -20,5 +21,6 @@ export async function setLaunchCheckItemForm(formData: FormData) {
 
   revalidatePath(`/sites/${siteId}`);
   revalidatePath("/sites");
-  redirect(`/sites/${siteId}`);
+  const focus = focusTokenFromFormData(formData);
+  redirect(appendSearchParams(`/sites/${siteId}`, focus ? { focus } : {}));
 }
