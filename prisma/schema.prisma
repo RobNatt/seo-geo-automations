@@ -13,6 +13,14 @@ model Site {
   businessName     String
   geoHint          String?
   primaryFocus     String?
+  /// Who you serve (onboarding / SEO brief).
+  targetAudience          String?
+  /// local | regional | national — drives location language in metadata & keywords.
+  marketFocus             String?
+  /// e.g. calls, form leads, bookings — maps to outcome language in titles.
+  primaryConversionGoal   String?
+  /// Optional seed keyword; never auto-applied without confirmation elsewhere.
+  priorityKeyword         String?
   /// intake: registered, no successful audit yet · audited: last completed run succeeded · blocked: last run failed
   onboardingStage  String   @default("intake")
   createdAt        DateTime @default(now())
@@ -139,6 +147,9 @@ model Page {
   id        String   @id @default(cuid())
   url       String   @unique
   title     String?
+  /// homepage | service | location | blog | about | other — rule-based metadata strategy.
+  pageType  String?
+  metaDescription String?
   status    String   @default("active")
   siteId    String?
   site      Site?    @relation(fields: [siteId], references: [id], onDelete: SetNull)

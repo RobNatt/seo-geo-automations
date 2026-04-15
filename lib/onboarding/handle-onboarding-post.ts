@@ -44,6 +44,11 @@ async function submitOnboardingFromFormData(formData: FormData, originUrl: strin
   const rawUrl = String(formData.get("rootUrl") ?? "").trim();
   const geoHint = String(formData.get("geoHint") ?? "").trim() || null;
   const primaryFocus = String(formData.get("primaryFocus") ?? "").trim() || null;
+  const targetAudience = String(formData.get("targetAudience") ?? "").trim() || null;
+  const marketFocusRaw = String(formData.get("marketFocus") ?? "").trim().toLowerCase();
+  const marketFocus = ["local", "regional", "national"].includes(marketFocusRaw) ? marketFocusRaw : null;
+  const primaryConversionGoal = String(formData.get("primaryConversionGoal") ?? "").trim() || null;
+  const priorityKeyword = String(formData.get("priorityKeyword") ?? "").trim() || null;
 
   if (!businessName) {
     return redirect(originUrl, "/onboard?msg=" + encodeURIComponent("Business name is required."));
@@ -84,6 +89,10 @@ async function submitOnboardingFromFormData(formData: FormData, originUrl: strin
           businessName,
           geoHint,
           primaryFocus,
+          targetAudience,
+          marketFocus,
+          primaryConversionGoal,
+          priorityKeyword,
         },
       });
       const page = await tx.page.create({
@@ -92,6 +101,7 @@ async function submitOnboardingFromFormData(formData: FormData, originUrl: strin
           title: businessName,
           siteId: site.id,
           serviceId,
+          pageType: "homepage",
         },
       });
       await tx.siteLaunchCheckItem.createMany({
