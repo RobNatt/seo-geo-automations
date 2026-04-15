@@ -25,7 +25,8 @@ export function ConditionalAppNav() {
   if (isSiteSummaryPath(pathname)) {
     const wl = searchParams.get("wl") ?? undefined;
     const full = searchParams.get("full") ?? undefined;
-    if (isWhiteLabelSiteSummaryMode({ wl, full })) {
+    const clientView = searchParams.get("clientView") ?? undefined;
+    if (isWhiteLabelSiteSummaryMode({ wl, full, clientView })) {
       return null;
     }
   }

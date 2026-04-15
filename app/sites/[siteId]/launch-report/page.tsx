@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { CopyReportButton } from "@/components/CopyReportButton";
 import { LaunchBlockersSection } from "@/components/LaunchBlockersSection";
+import { LaunchWarningsSection } from "@/components/LaunchWarningsSection";
 import { prisma } from "@/lib/db";
 import {
   formatRunSummary,
@@ -16,7 +17,11 @@ import {
   buildContentGapsPlainTextSection,
   rankContentGapOpportunities,
 } from "@/lib/sites/content-gap-rank";
-import { collectLaunchBlockers } from "@/lib/sites/launch-blockers";
+import {
+  collectLaunchBlockers,
+  collectLaunchWarnings,
+  summarizeAuditHardFailures,
+} from "@/lib/sites/launch-blockers";
 import { buildLaunchReportPlainText } from "@/lib/sites/launch-report-text";
 import { listPromptClusterPlannerRows } from "@/lib/sites/prompt-clusters";
 import { sortOpenFixTasksByPriority } from "@/lib/fix-tasks/open-task-priority";
@@ -46,6 +51,15 @@ export default async function SiteLaunchReportPage({ params }: { params: Promise
   const homepage = await prisma.page.findFirst({
     where: { siteId: site.id },
     orderBy: { createdAt: "asc" },
+    select: {
+      id: true,
+      url: true,
+      performanceScore: true,
+      accessibilityScore: true,
+      bestPracticesScore: true,
+      seoScore: true,
+      performanceLastAudited: true,
+    },
   });
 
   const openFixTasks = sortOpenFixTasksByPriority(
@@ -65,17 +79,21 @@ export default async function SiteLaunchReportPage({ params }: { params: Promise
     : null;
 
   const latestCounts = parseRunSummaryCounts(latestRun?.summary ?? null);
+  const latestAuditRows =
+    latestRun?.results?.map((r) => ({ checkKey: r.checkKey, status: r.status })) ?? [];
+  const hardFailCount = summarizeAuditHardFailures(latestAuditRows).length;
   const openFixTaskCount = openFixTasks.length;
+  const launchBlockingOpenFixTaskCount = openFixTasks.filter((t) => t.bucket === "immediate").length;
   const readiness = evaluateLaunchReadinessSummary({
     hasHomepage: Boolean(homepage),
     latestRunStatus: latestRun?.status ?? null,
     onboardingStage: site.onboardingStage,
-    checkFailCount: latestCounts.fail,
+    checkFailCount: hardFailCount,
     checkWarnCount: latestCounts.warn,
     summaryHasError: latestCounts.hasError,
     launchDone,
     launchExpected: launchTotal,
-    openFixTaskCount,
+    openFixTaskCount: launchBlockingOpenFixTaskCount,
   });
 
   const launchBlockers = collectLaunchBlockers({
@@ -84,11 +102,15 @@ export default async function SiteLaunchReportPage({ params }: { params: Promise
     onboardingStage: site.onboardingStage,
     summaryHasError: latestCounts.hasError,
     summaryErrorMessage: parseSummaryErrorMessage(latestRun?.summary ?? null),
-    auditResults:
-      latestRun?.results?.map((r) => ({ checkKey: r.checkKey, status: r.status })) ?? [],
+    auditResults: latestAuditRows,
     checklistUndone: launchItems.filter((i) => !i.done).map((i) => ({ key: i.key, label: i.label })),
-    openFixTasks: openFixTasks.map((t) => ({ dedupeKey: t.dedupeKey, title: t.title })),
+    openFixTasks: openFixTasks.map((t) => ({
+      dedupeKey: t.dedupeKey,
+      title: t.title,
+      blocksLaunch: t.bucket === "immediate",
+    })),
   });
+  const launchWarnings = collectLaunchWarnings({ auditResults: latestAuditRows });
 
   const promptPlannerRows = await listPromptClusterPlannerRows(site.id);
   const rankedContentGaps = rankContentGapOpportunities(promptPlannerRows, {
@@ -108,6 +130,17 @@ export default async function SiteLaunchReportPage({ params }: { params: Promise
     : { high: [], maintenance: [] };
 
   const generatedAtIso = new Date().toISOString();
+  const [openContentOpportunities, partnershipRows] = await Promise.all([
+    prisma.contentOpportunity.count({
+      where: { siteId: site.id, status: { in: ["identified", "planned", "active"] } },
+    }),
+    prisma.partnership.findMany({
+      where: { siteId: site.id },
+      select: { status: true },
+    }),
+  ]);
+  const partnershipsInProgress = partnershipRows.filter((p) => p.status === "in_progress").length;
+  const partnershipsDone = partnershipRows.filter((p) => p.status === "done").length;
   const plainText = buildLaunchReportPlainText({
     generatedAtIso,
     businessName: site.businessName,
@@ -157,12 +190,49 @@ export default async function SiteLaunchReportPage({ params }: { params: Promise
 
       <article className="mt-8 space-y-8 text-sm">
         <section>
+          <h2 className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Program phases (0-6)</h2>
+          <ul className="mt-2 space-y-1 text-zinc-700 dark:text-zinc-300">
+            <li>Phase 0 – Core foundation: complete</li>
+            <li>Phase 1 – Set &amp; Forget baseline: complete</li>
+            <li>Phase 2 – Lighthouse + Core Web Vitals: complete</li>
+            <li>Phase 3 – Maintenance automation: complete</li>
+            <li>Phase 4 – Growth cadence automation: complete</li>
+            <li>
+              Phase 5 – Content &amp; GEO opportunities: {openContentOpportunities > 0 ? "active" : "ready to generate"}
+            </li>
+            <li>
+              Phase 6 – Partnerships &amp; reporting:{" "}
+              {partnershipsDone > 0 || partnershipsInProgress > 0 ? "active" : "not started"}
+            </li>
+          </ul>
+        </section>
+
+        <section>
           <h2 className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Readiness</h2>
           <p className="mt-2 font-medium text-zinc-900 dark:text-zinc-100">{readiness.stateLabel}</p>
           <p className="mt-1 text-zinc-600 dark:text-zinc-400">{readiness.nextStep}</p>
         </section>
 
+        <section>
+          <h2 className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Performance summary</h2>
+          {homepage ? (
+            <ul className="mt-2 space-y-1 text-zinc-700 dark:text-zinc-300">
+              <li>Performance score: {homepage.performanceScore ?? "—"}</li>
+              <li>Accessibility score: {homepage.accessibilityScore ?? "—"}</li>
+              <li>Best-practices score: {homepage.bestPracticesScore ?? "—"}</li>
+              <li>SEO score: {homepage.seoScore ?? "—"}</li>
+              <li>
+                Last audited:{" "}
+                {homepage.performanceLastAudited ? homepage.performanceLastAudited.toISOString() : "Not audited yet"}
+              </li>
+            </ul>
+          ) : (
+            <p className="mt-2 text-zinc-500">No homepage found for Lighthouse summary.</p>
+          )}
+        </section>
+
         <LaunchBlockersSection blockers={launchBlockers} />
+        <LaunchWarningsSection warnings={launchWarnings} />
 
         <section>
           <h2 className="text-xs font-semibold uppercase tracking-wide text-zinc-500">

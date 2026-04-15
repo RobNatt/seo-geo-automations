@@ -3,38 +3,57 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { prisma } from "@/lib/db";
-import { normalizeRootUrl } from "@/lib/onboarding/normalize-root-url";
+import { buildGeoAreaNoteVisible } from "@/lib/geo/location-statement";
+import { PAGE_TYPES, buildMetadataOptions, type PageType } from "@/lib/metadata";
+import { buildKeywordSuggestions } from "@/lib/keywords";
 import {
-  buildMetadataSuggestions,
-  mergePrimaryServiceNames,
+  buildSiteBriefFromSite,
+  parseBrandTone,
+  parseListInput,
   parseMarketFocus,
-  parsePageType,
-  type PageType,
-} from "@/lib/seo/metadata-suggestions";
+} from "@/lib/site-brief";
 
 function msgRedirect(siteId: string, text: string): never {
   redirect(`/sites/${siteId}/metadata?msg=${encodeURIComponent(text)}`);
+}
+
+function parsePageType(raw: string | null | undefined): PageType | null {
+  const v = (raw ?? "").trim() as PageType;
+  return PAGE_TYPES.includes(v) ? v : null;
 }
 
 export async function updateSiteSeoBriefForm(formData: FormData) {
   const siteId = String(formData.get("siteId") ?? "").trim();
   if (!siteId) redirect("/sites");
 
+  const primaryServices = parseListInput(String(formData.get("primaryServices") ?? ""));
   const targetAudience = String(formData.get("targetAudience") ?? "").trim() || null;
-  const marketFocusRaw = String(formData.get("marketFocus") ?? "").trim().toLowerCase();
-  const marketFocus = ["local", "regional", "national"].includes(marketFocusRaw) ? marketFocusRaw : null;
+  const marketFocus = parseMarketFocus(String(formData.get("marketFocus") ?? ""));
+  const serviceArea = parseListInput(String(formData.get("serviceArea") ?? ""));
   const primaryConversionGoal = String(formData.get("primaryConversionGoal") ?? "").trim() || null;
-  const priorityKeyword = String(formData.get("priorityKeyword") ?? "").trim() || null;
+  const brandTone = parseBrandTone(String(formData.get("brandTone") ?? ""));
+  const optionalPriorityKeyword = String(formData.get("optionalPriorityKeyword") ?? "").trim() || null;
+  const priorityKeyword = optionalPriorityKeyword || String(formData.get("priorityKeyword") ?? "").trim() || null;
   const geoHint = String(formData.get("geoHint") ?? "").trim() || null;
 
   await prisma.site.update({
     where: { id: siteId },
     data: {
+      primaryServices,
       targetAudience,
       marketFocus,
+      serviceArea,
       primaryConversionGoal,
+      brandTone,
+      optionalPriorityKeyword,
       priorityKeyword,
       geoHint,
+      geoAreaNoteVisible: buildGeoAreaNoteVisible({
+        marketFocus,
+        serviceArea: serviceArea.length ? serviceArea : geoHint ? [geoHint] : [],
+        primaryServices,
+        targetAudience: targetAudience ?? "",
+      }),
     },
   });
 
@@ -47,8 +66,8 @@ export async function applyPageMetadataForm(formData: FormData) {
   const siteId = String(formData.get("siteId") ?? "").trim();
   const pageId = String(formData.get("pageId") ?? "").trim();
   const pageTypeRaw = String(formData.get("pageType") ?? "").trim();
-  const blogTopicHint = String(formData.get("blogTopicHint") ?? "").trim() || undefined;
-  const locationOverride = String(formData.get("locationOverride") ?? "").trim() || undefined;
+  const topicHint = String(formData.get("topicHint") ?? "").trim() || undefined;
+  const selectedOption = Number(String(formData.get("selectedOption") ?? "0"));
   const confirmed = String(formData.get("confirmed") ?? "").trim() === "1";
 
   if (!siteId) redirect("/sites");
@@ -75,53 +94,68 @@ export async function applyPageMetadataForm(formData: FormData) {
     msgRedirect(siteId, "Site not found.");
   }
 
-  const pagesForServices = await prisma.page.findMany({
-    where: { siteId },
-    select: { service: { select: { name: true } } },
-  });
-  const catalogNames = pagesForServices
-    .map((p) => p.service?.name)
-    .filter((n): n is string => Boolean(n));
-
-  const brief = {
-    businessName: site.businessName,
-    primaryServices: mergePrimaryServiceNames(site.primaryFocus, catalogNames),
-    targetAudience: site.targetAudience ?? "",
-    marketFocus: parseMarketFocus(site.marketFocus),
-    serviceAreaOrLocation: site.geoHint ?? "",
-    primaryConversionGoal: site.primaryConversionGoal ?? "",
-    priorityKeyword: site.priorityKeyword ?? undefined,
-  };
+  const brief = buildSiteBriefFromSite(site);
 
   const strategy: PageType = pageType;
-
-  const suggestions = buildMetadataSuggestions(brief, {
+  const metadataOptions = buildMetadataOptions({
+    brief,
     pageType: strategy,
-    linkedServiceName: page.service?.name ?? null,
-    blogTopicHint,
-    locationOverride,
+    linkedService: page.service?.name ?? null,
+    topicHint,
   });
+  const index = Number.isFinite(selectedOption) ? Math.max(0, Math.min(2, selectedOption)) : 0;
+  const selected = metadataOptions[index]!;
 
   await prisma.page.update({
     where: { id: pageId },
     data: {
-      title: suggestions.suggestedTitle,
-      metaDescription: suggestions.suggestedMetaDescription,
+      title: selected.title,
+      metaDescription: selected.metaDescription,
       pageType: strategy,
     },
   });
 
   revalidatePath(`/sites/${siteId}`);
   revalidatePath(`/sites/${siteId}/metadata`);
+  revalidatePath(`/sites/${siteId}`);
   revalidatePath("/pages");
-  msgRedirect(siteId, "Title, meta description, and page type were saved for this page.");
+  msgRedirect(siteId, "Selected metadata option applied. Keywords remain suggestions only.");
 }
 
-/** True when normalized page URL matches site homepage URL (hint only — not used inside the rules engine). */
-export function pageLooksLikeHomepage(siteRootUrl: string, pageUrl: string): boolean {
-  try {
-    return normalizeRootUrl(siteRootUrl) === normalizeRootUrl(pageUrl);
-  } catch {
-    return false;
-  }
+export async function previewSiteSuggestionsForm(formData: FormData) {
+  const siteId = String(formData.get("siteId") ?? "").trim();
+  const pageId = String(formData.get("pageId") ?? "").trim();
+  const pageType = String(formData.get("pageType") ?? "").trim();
+  const topicHint = String(formData.get("topicHint") ?? "").trim();
+  if (!siteId) redirect("/sites");
+  const query = new URLSearchParams();
+  if (pageId) query.set("pageId", pageId);
+  if (pageType) query.set("pageType", pageType);
+  if (topicHint) query.set("topicHint", topicHint);
+  redirect(`/sites/${siteId}/metadata?${query.toString()}`);
+}
+
+export async function loadPreviewSuggestions(args: {
+  siteId: string;
+  pageId: string;
+  pageType: PageType;
+  topicHint?: string;
+}) {
+  const [site, page] = await Promise.all([
+    prisma.site.findUnique({ where: { id: args.siteId } }),
+    prisma.page.findFirst({ where: { id: args.pageId, siteId: args.siteId }, include: { service: true } }),
+  ]);
+  if (!site || !page) return null;
+  const brief = buildSiteBriefFromSite(site);
+  const metadataOptions = buildMetadataOptions({
+    brief,
+    pageType: args.pageType,
+    linkedService: page.service?.name ?? null,
+    topicHint: args.topicHint,
+  });
+  const keywordOptions = buildKeywordSuggestions({
+    brief,
+    pageKind: args.pageType === "blog" ? "blog-support" : "service",
+  });
+  return { site, page, brief, metadataOptions, keywordOptions };
 }

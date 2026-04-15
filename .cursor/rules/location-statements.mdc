@@ -1,0 +1,24 @@
+---
+description: User-visible location statements
+globs: "**/*location*.tsx,**/lib/geo/**"
+alwaysApply: true
+---
+
+# Location Statement Rules
+
+## Templates
+
+- **Local-first:** `We serve [City] and [Metro] with [service], supporting [national scope].`
+- **Regional:** `Serving [Service Area] businesses with [service focus].`
+- **National:** `Delivering [service] nationwide for [audience].`
+- **Dual:** `In-market execution for [City/Metro] with national reach for growth teams.`
+
+## For this agency
+
+`We serve Omaha and the Nebraska metro with in-market strategy and execution, while still delivering nationwide for growth-focused teams.`
+
+## Usage
+
+- Use in homepage copy, about page, and service descriptions.
+- Make location visible to users (not just tags/metadata).
+- Keep wording natural, specific, and benefit-focused.

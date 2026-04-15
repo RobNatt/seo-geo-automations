@@ -1,0 +1,46 @@
+---
+description: Metadata and title generation rules for SEO/GEO app
+globs: "**/*metadata*.ts,**/*title*.tsx,**/onboarding/**"
+alwaysApply: true
+---
+
+# Metadata Generation Rules
+
+## Core principles
+
+- Generate titles and metas from **onboarding brief data**, not URL alone.
+- Prioritize business goals, services, audience, and conversion intent.
+- Use **page type** to determine structure.
+- Suggest **low-barrier, high-opportunity** keywords (long-tail, service-specific first).
+- Always surface **3 keyword options** each with reasoning.
+- **Never auto-apply** metadata without explicit user confirmation in the UI.
+
+## Page type title patterns (targets)
+
+- **Homepage:** `[Brand] | [Core Service] & [Outcome]`
+- **Service:** `[Service] | [Brand] - [Location if local]`
+- **Location:** `[Service] [Location] | [Brand]`
+- **Blog:** `[Question/Topic] | [Brand]`
+- **About:** `[Brand] | [Trust Signal]`
+
+Implementations may shorten for length limits; keep the same intent order.
+
+## Local vs national
+
+- **Local-first:** Include city/metro in title and meta where it reads naturally.
+- **Regional:** Mention service area without stuffing.
+- **National:** Location optional; emphasize service + outcome.
+- **Dual focus:** Local in visible copy; national reach in intent (no contradictory claims).
+
+## Keyword selection (priority order)
+
+1. Service-specific long-tail.
+2. Local service phrases if local-first.
+3. Question-based for blog/support.
+4. Branded service terms.
+5. Avoid high-competition head terms unless brief explicitly seeds them.
+
+## Implementation alignment
+
+- Keep logic **deterministic** and **explainable** (no black-box scoring).
+- **Do not** persist keywords from suggestions unless the product explicitly adds storage later; titles/meta apply only via an explicit apply action.

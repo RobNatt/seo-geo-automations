@@ -7,7 +7,7 @@ export function LaunchBlockersSection({ blockers }: { blockers: LaunchBlocker[] 
         Launch blockers
       </h2>
       <p className="mt-1 text-xs text-red-800/90 dark:text-red-200/80">
-        Only items that block the “ready to go live” bar (audit + checklist + open tasks).
+        Only hard blockers are shown here (hard audit failures, incomplete checklist items, and launch-blocking tasks).
       </p>
       {blockers.length === 0 ? (
         <p className="mt-3 text-sm font-medium text-emerald-800 dark:text-emerald-200">None.</p>

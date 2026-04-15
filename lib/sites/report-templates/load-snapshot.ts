@@ -5,7 +5,7 @@ import {
   buildSiteGrowthOpportunities,
   limitGrowthOpportunities,
 } from "@/lib/sites/content-pipeline";
-import { collectLaunchBlockers } from "@/lib/sites/launch-blockers";
+import { collectLaunchBlockers, summarizeAuditHardFailures } from "@/lib/sites/launch-blockers";
 import {
   ensureLaunchChecklistForSite,
   LAUNCH_CHECKLIST_DEF,
@@ -67,6 +67,15 @@ export async function loadSiteReportSnapshot(
   const homepage = await prisma.page.findFirst({
     where: { siteId: site.id },
     orderBy: { createdAt: "asc" },
+    select: {
+      id: true,
+      url: true,
+      performanceScore: true,
+      accessibilityScore: true,
+      bestPracticesScore: true,
+      seoScore: true,
+      performanceLastAudited: true,
+    },
   });
 
   const openFixTasksAll = sortOpenFixTasksByPriority(
@@ -84,16 +93,20 @@ export async function loadSiteReportSnapshot(
     : null;
 
   const latestCounts = parseRunSummaryCounts(latestRun?.summary ?? null);
+  const latestAuditRows =
+    latestRun?.results?.map((r) => ({ checkKey: r.checkKey, status: r.status })) ?? [];
+  const hardFailCount = summarizeAuditHardFailures(latestAuditRows).length;
+  const launchBlockingOpenFixTaskCount = openFixTasksAll.filter((t) => t.bucket === "immediate").length;
   const readiness = evaluateLaunchReadinessSummary({
     hasHomepage: Boolean(homepage),
     latestRunStatus: latestRun?.status ?? null,
     onboardingStage: site.onboardingStage,
-    checkFailCount: latestCounts.fail,
+    checkFailCount: hardFailCount,
     checkWarnCount: latestCounts.warn,
     summaryHasError: latestCounts.hasError,
     launchDone,
     launchExpected: launchTotal,
-    openFixTaskCount: openFixTasksAll.length,
+    openFixTaskCount: launchBlockingOpenFixTaskCount,
   });
 
   const launchBlockers = collectLaunchBlockers({
@@ -102,10 +115,13 @@ export async function loadSiteReportSnapshot(
     onboardingStage: site.onboardingStage,
     summaryHasError: latestCounts.hasError,
     summaryErrorMessage: parseSummaryErrorMessage(latestRun?.summary ?? null),
-    auditResults:
-      latestRun?.results?.map((r) => ({ checkKey: r.checkKey, status: r.status })) ?? [],
+    auditResults: latestAuditRows,
     checklistUndone: launchItems.filter((i) => !i.done).map((i) => ({ key: i.key, label: i.label })),
-    openFixTasks: openFixTasksAll.map((t) => ({ dedupeKey: t.dedupeKey, title: t.title })),
+    openFixTasks: openFixTasksAll.map((t) => ({
+      dedupeKey: t.dedupeKey,
+      title: t.title,
+      blocksLaunch: t.bucket === "immediate",
+    })),
   });
 
   const doneThisMonth = await prisma.siteFixTask.findMany({
@@ -118,6 +134,27 @@ export async function loadSiteReportSnapshot(
     take: DONE_FIXES_CAP,
     select: { title: true },
   });
+
+  const [maintenanceActiveCount, maintenanceThisMonthCount, growthPendingCount, growthDoneThisMonthCount, openContentOpportunityCount, doneContentOpportunityThisMonthCount, partnershipRows] =
+    await Promise.all([
+      prisma.maintenanceAlert.count({ where: { siteId: site.id, status: "active" } }),
+      prisma.maintenanceAlert.count({ where: { siteId: site.id, createdAt: { gte: start, lte: end } } }),
+      prisma.growthTask.count({ where: { siteId: site.id, status: "pending" } }),
+      prisma.growthTask.count({ where: { siteId: site.id, status: "done", completedAt: { gte: start, lte: end } } }),
+      prisma.contentOpportunity.count({ where: { siteId: site.id, status: { in: ["identified", "planned", "active"] } } }),
+      prisma.contentOpportunity.count({ where: { siteId: site.id, status: "done", updatedAt: { gte: start, lte: end } } }),
+      prisma.partnership.findMany({
+        where: { siteId: site.id },
+        select: { status: true, lastActivity: true },
+      }),
+    ]);
+
+  const partnershipDoneCount = partnershipRows.filter((r) => r.status === "done").length;
+  const partnershipInProgressCount = partnershipRows.filter((r) => r.status === "in_progress").length;
+  const partnershipNotStartedCount = partnershipRows.filter((r) => r.status === "not_started").length;
+  const partnershipActivityThisMonthCount = partnershipRows.filter(
+    (r) => r.lastActivity >= start && r.lastActivity <= end,
+  ).length;
 
   const snaps = await prisma.contentPerformanceSnapshot.findMany({
     where: {
@@ -225,6 +262,31 @@ export async function loadSiteReportSnapshot(
       totalImp,
       totalClk,
       topPages,
+    },
+    lighthouse: {
+      performanceScore: homepage?.performanceScore ?? null,
+      accessibilityScore: homepage?.accessibilityScore ?? null,
+      bestPracticesScore: homepage?.bestPracticesScore ?? null,
+      seoScore: homepage?.seoScore ?? null,
+      lastAudited: homepage?.performanceLastAudited ?? null,
+    },
+    maintenance: {
+      activeCount: maintenanceActiveCount,
+      thisMonthCount: maintenanceThisMonthCount,
+    },
+    growth: {
+      pendingCount: growthPendingCount,
+      doneThisMonthCount: growthDoneThisMonthCount,
+    },
+    contentOpportunities: {
+      openCount: openContentOpportunityCount,
+      doneThisMonthCount: doneContentOpportunityThisMonthCount,
+    },
+    partnerships: {
+      doneCount: partnershipDoneCount,
+      inProgressCount: partnershipInProgressCount,
+      notStartedCount: partnershipNotStartedCount,
+      activityThisMonthCount: partnershipActivityThisMonthCount,
     },
     refreshHigh,
     growthOpportunities,

@@ -43,6 +43,31 @@ export type SiteReportSnapshot = {
     totalClk: number;
     topPages: { url: string; imp: number; clk: number }[];
   };
+  lighthouse: {
+    performanceScore: number | null;
+    accessibilityScore: number | null;
+    bestPracticesScore: number | null;
+    seoScore: number | null;
+    lastAudited: Date | null;
+  };
+  maintenance: {
+    activeCount: number;
+    thisMonthCount: number;
+  };
+  growth: {
+    pendingCount: number;
+    doneThisMonthCount: number;
+  };
+  contentOpportunities: {
+    openCount: number;
+    doneThisMonthCount: number;
+  };
+  partnerships: {
+    doneCount: number;
+    inProgressCount: number;
+    notStartedCount: number;
+    activityThisMonthCount: number;
+  };
   refreshHigh: { url: string; reasonLine: string }[];
   growthOpportunities: GrowthOpportunity[];
   rankedContentGaps: RankedContentGap[];

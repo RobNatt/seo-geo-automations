@@ -10,7 +10,11 @@ import {
   limitGrowthOpportunities,
   segmentLabel,
 } from "@/lib/sites/content-pipeline";
-import { collectLaunchBlockers, type LaunchBlocker } from "@/lib/sites/launch-blockers";
+import {
+  collectLaunchBlockers,
+  summarizeAuditHardFailures,
+  type LaunchBlocker,
+} from "@/lib/sites/launch-blockers";
 import {
   ensureLaunchChecklistForSite,
   LAUNCH_CHECKLIST_DEF,
@@ -116,16 +120,20 @@ export async function loadClientSiteReport(siteId: string): Promise<ClientSiteRe
     : null;
 
   const latestCounts = parseRunSummaryCounts(latestRun?.summary ?? null);
+  const latestAuditRows =
+    latestRun?.results?.map((r) => ({ checkKey: r.checkKey, status: r.status })) ?? [];
+  const hardFailCount = summarizeAuditHardFailures(latestAuditRows).length;
+  const launchBlockingOpenFixTaskCount = openFixTasks.filter((t) => t.bucket === "immediate").length;
   const readiness = evaluateLaunchReadinessSummary({
     hasHomepage: Boolean(homepage),
     latestRunStatus: latestRun?.status ?? null,
     onboardingStage: site.onboardingStage,
-    checkFailCount: latestCounts.fail,
+    checkFailCount: hardFailCount,
     checkWarnCount: latestCounts.warn,
     summaryHasError: latestCounts.hasError,
     launchDone,
     launchExpected: launchTotal,
-    openFixTaskCount: openFixTasks.length,
+    openFixTaskCount: launchBlockingOpenFixTaskCount,
   });
 
   const launchBlockers = collectLaunchBlockers({
@@ -134,10 +142,13 @@ export async function loadClientSiteReport(siteId: string): Promise<ClientSiteRe
     onboardingStage: site.onboardingStage,
     summaryHasError: latestCounts.hasError,
     summaryErrorMessage: parseSummaryErrorMessage(latestRun?.summary ?? null),
-    auditResults:
-      latestRun?.results?.map((r) => ({ checkKey: r.checkKey, status: r.status })) ?? [],
+    auditResults: latestAuditRows,
     checklistUndone: launchItems.filter((i) => !i.done).map((i) => ({ key: i.key, label: i.label })),
-    openFixTasks: openFixTasks.map((t) => ({ dedupeKey: t.dedupeKey, title: t.title })),
+    openFixTasks: openFixTasks.map((t) => ({
+      dedupeKey: t.dedupeKey,
+      title: t.title,
+      blocksLaunch: t.bucket === "immediate",
+    })),
   });
 
   const promptPlannerRows = await listPromptClusterPlannerRows(site.id);

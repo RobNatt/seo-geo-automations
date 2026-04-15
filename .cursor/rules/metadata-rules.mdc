@@ -1,0 +1,8 @@
+---
+description: Alias rule file for metadata generation logic
+alwaysApply: true
+---
+
+# Metadata Rules Alias
+
+Use `.cursor/rules/metadata-generation.mdc` as the canonical source for page-type title/meta behavior.

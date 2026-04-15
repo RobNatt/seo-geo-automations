@@ -13,12 +13,35 @@ model Site {
   businessName     String
   geoHint          String?
   primaryFocus     String?
+  /// Canonical brief field. Stored on Site (not a separate table) per product constraints.
+  primaryServices  Json?
+  /// Canonical brief field (service area locations list).
+  serviceArea      Json?
   /// Who you serve (onboarding / SEO brief).
   targetAudience          String?
-  /// local | regional | national — drives location language in metadata & keywords.
+  /// local | regional | national | dual — drives location language in metadata & keywords.
   marketFocus             String?
   /// e.g. calls, form leads, bookings — maps to outcome language in titles.
   primaryConversionGoal   String?
+  /// professional | friendly | technical | outcome-led
+  brandTone               String?
+  /// Optional seed keyword field from onboarding brief.
+  optionalPriorityKeyword String?
+  /// User-visible location statement used in homepage/about/service copy.
+  geoAreaNoteVisible      String?
+  /// Manual canonical NAP record (JSON: {name,address,phone}).
+  canonicalNap            Json?
+  /// Manual GBP snapshot (JSON: {name,address,phone}).
+  gbpNap                  Json?
+  /// Manual directory aggregate snapshot (JSON: {name,address,phone}).
+  directoryNap            Json?
+  /// Manual/derived sitemap URL snapshot for maintenance checks.
+  sitemapKnownUrls        Json?
+  /// Mock GSC counts until API integration arrives.
+  gscExcludedPages        Int?
+  gscCrawlErrors          Int?
+  /// Summary text from llms.txt (or last reviewed positioning).
+  llmsPositioningSummary  String?
   /// Optional seed keyword; never auto-applied without confirmation elsewhere.
   priorityKeyword         String?
   /// intake: registered, no successful audit yet · audited: last completed run succeeded · blocked: last run failed
@@ -34,6 +57,10 @@ model Site {
   contentPerformanceSnapshots ContentPerformanceSnapshot[]
   contentRefreshQueueItems    ContentRefreshQueueItem[]
   pageRefreshWorkflows        PageRefreshWorkflow[]
+  maintenanceAlerts     MaintenanceAlert[]
+  growthTasks           GrowthTask[]
+  contentOpportunities  ContentOpportunity[]
+  partnerships          Partnership[]
 }
 
 /// Opportunities selected for manual content execution; one row per (site, opportunityKey).
@@ -150,6 +177,13 @@ model Page {
   /// homepage | service | location | blog | about | other — rule-based metadata strategy.
   pageType  String?
   metaDescription String?
+  /// Lighthouse-style scores (0-100), advisory only.
+  performanceScore Int?
+  accessibilityScore Int?
+  bestPracticesScore Int?
+  seoScore Int?
+  performanceLastAudited DateTime?
+  performanceAuditUrl String?
   status    String   @default("active")
   siteId    String?
   site      Site?    @relation(fields: [siteId], references: [id], onDelete: SetNull)
@@ -280,4 +314,90 @@ model TriggerTask {
   title       String
   createdAt   DateTime  @default(now())
   completedAt DateTime?
+}
+
+model MaintenanceAlert {
+  id         String   @id @default(cuid())
+  siteId     String
+  site       Site     @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  triggerKey String
+  /// active | resolved
+  status     String   @default("active")
+  reason     String
+  nextAction String
+  /// high | medium | low
+  priority   String
+  createdAt  DateTime @default(now())
+  resolvedAt DateTime?
+  updatedAt  DateTime @updatedAt
+
+  @@index([siteId, status])
+  @@index([siteId, triggerKey, status])
+}
+
+model GrowthTask {
+  id          String   @id @default(cuid())
+  siteId       String
+  site         Site     @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  /// daily | weekly | biweekly | monthly | quarterly | yearly
+  cadence      String
+  taskKey      String
+  /// pending | done
+  status       String   @default("pending")
+  dueDate      DateTime
+  description  String
+  nextAction   String
+  /// high | medium | low
+  priority     String
+  createdAt    DateTime @default(now())
+  completedAt  DateTime?
+  updatedAt    DateTime @updatedAt
+
+  @@index([siteId, status, dueDate])
+  @@index([siteId, cadence, dueDate])
+  @@index([siteId, taskKey, status])
+  @@unique([siteId, cadence, taskKey, dueDate])
+}
+
+model ContentOpportunity {
+  id                 String   @id @default(cuid())
+  siteId             String
+  site               Site     @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  /// service | faq | supporting
+  type               String
+  topic              String
+  /// high | medium | low
+  priority           String
+  /// identified | planned | active | done | dismissed
+  status             String   @default("identified")
+  reason             String
+  nextAction         String
+  /// JSON array of deterministic keyword suggestions
+  keywordSuggestions Json?
+  dueDate            DateTime?
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  @@index([siteId, status, priority])
+  @@index([siteId, type, status])
+  @@unique([siteId, type, topic, status])
+}
+
+model Partnership {
+  id           String   @id @default(cuid())
+  siteId       String
+  site         Site     @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  /// directory | referral | podcast | co_marketing | chamber
+  type         String
+  partnerName  String
+  /// not_started | in_progress | done
+  status       String   @default("not_started")
+  nextAction   String?
+  notes        String?
+  createdAt    DateTime @default(now())
+  lastActivity DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@unique([siteId, type, partnerName])
+  @@index([siteId, status, type])
 }

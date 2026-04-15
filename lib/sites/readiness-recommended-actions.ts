@@ -33,7 +33,7 @@ export function recommendedActionsForReadinessState(
     case "nearly_ready":
       return {
         headline: "Resolve high-priority audit issues",
-        detail: "Work immediate fix tasks, audit warnings, and remaining checklist sign-offs.",
+        detail: "Work immediate fix tasks and remaining checklist sign-offs; treat warnings as advisory follow-ups.",
       };
     case "ready":
       return {

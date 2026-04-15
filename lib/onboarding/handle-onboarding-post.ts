@@ -4,8 +4,10 @@ import { unstable_rethrow } from "next/navigation";
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { runPageAudit } from "@/lib/audits/run-page-audit";
+import { buildGeoAreaNoteVisible } from "@/lib/geo/location-statement";
 import { normalizeRootUrl } from "@/lib/onboarding/normalize-root-url";
 import { onboardFailureErrCode } from "@/lib/onboard-error-codes";
+import { parseBrandTone, parseListInput, parseMarketFocus } from "@/lib/site-brief";
 import { LAUNCH_CHECKLIST_DEF } from "@/lib/sites/launch-checklist";
 
 function slugify(input: string) {
@@ -44,11 +46,14 @@ async function submitOnboardingFromFormData(formData: FormData, originUrl: strin
   const rawUrl = String(formData.get("rootUrl") ?? "").trim();
   const geoHint = String(formData.get("geoHint") ?? "").trim() || null;
   const primaryFocus = String(formData.get("primaryFocus") ?? "").trim() || null;
+  const primaryServices = parseListInput(String(formData.get("primaryServices") ?? ""));
   const targetAudience = String(formData.get("targetAudience") ?? "").trim() || null;
-  const marketFocusRaw = String(formData.get("marketFocus") ?? "").trim().toLowerCase();
-  const marketFocus = ["local", "regional", "national"].includes(marketFocusRaw) ? marketFocusRaw : null;
+  const marketFocus = parseMarketFocus(String(formData.get("marketFocus") ?? ""));
+  const serviceArea = parseListInput(String(formData.get("serviceArea") ?? ""));
   const primaryConversionGoal = String(formData.get("primaryConversionGoal") ?? "").trim() || null;
-  const priorityKeyword = String(formData.get("priorityKeyword") ?? "").trim() || null;
+  const brandTone = parseBrandTone(String(formData.get("brandTone") ?? ""));
+  const optionalPriorityKeyword = String(formData.get("optionalPriorityKeyword") ?? "").trim() || null;
+  const priorityKeyword = optionalPriorityKeyword || String(formData.get("priorityKeyword") ?? "").trim() || null;
 
   if (!businessName) {
     return redirect(originUrl, "/onboard?msg=" + encodeURIComponent("Business name is required."));
@@ -89,10 +94,20 @@ async function submitOnboardingFromFormData(formData: FormData, originUrl: strin
           businessName,
           geoHint,
           primaryFocus,
+          primaryServices,
           targetAudience,
           marketFocus,
+          serviceArea,
           primaryConversionGoal,
+          brandTone,
+          optionalPriorityKeyword,
           priorityKeyword,
+          geoAreaNoteVisible: buildGeoAreaNoteVisible({
+            marketFocus,
+            serviceArea: serviceArea.length ? serviceArea : geoHint ? [geoHint] : [],
+            primaryServices: primaryServices.length ? primaryServices : primaryFocus ? [primaryFocus] : ["in-market strategy"],
+            targetAudience: targetAudience ?? "",
+          }),
         },
       });
       const page = await tx.page.create({

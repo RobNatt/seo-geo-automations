@@ -277,6 +277,50 @@ function renderLaunchReadiness(s: SiteReportSnapshot): string {
   });
 }
 
+function renderMonthlyOps(s: SiteReportSnapshot): string {
+  const { labelLong, labelShort } = s.month;
+  const lines: string[] = [];
+  lines.push("# Monthly Executive SEO/GEO Report");
+  lines.push("");
+  lines.push(`- Client: ${s.site.businessName}`);
+  lines.push(`- Website: ${s.site.rootUrl}`);
+  lines.push(`- Reporting month (UTC): ${labelLong} (${labelShort})`);
+  lines.push(`- Generated: ${s.generatedAt.toISOString()}`);
+  lines.push("");
+  lines.push("## Business Outcome Summary");
+  lines.push(`- Readiness: **${s.readiness.stateLabel}**`);
+  lines.push(`- Next best focus: ${s.readiness.nextStep}`);
+  lines.push(`- Lighthouse scores: performance ${s.lighthouse.performanceScore ?? "—"}, accessibility ${s.lighthouse.accessibilityScore ?? "—"}, best-practices ${s.lighthouse.bestPracticesScore ?? "—"}, SEO ${s.lighthouse.seoScore ?? "—"}`);
+  lines.push(`- Operational health: ${s.maintenance.activeCount} active maintenance alerts, ${s.growth.pendingCount} pending growth tasks, ${s.contentOpportunities.openCount} open content opportunities`);
+  lines.push("");
+  lines.push("## Phase Progress (0-6)");
+  lines.push("- Phase 0 Core foundation: complete");
+  lines.push("- Phase 1 Set & Forget baseline: complete");
+  lines.push("- Phase 2 Lighthouse + Core Web Vitals: complete");
+  lines.push("- Phase 3 Maintenance automation: complete");
+  lines.push("- Phase 4 Growth cadence automation: complete");
+  lines.push(
+    `- Phase 5 Content & GEO opportunity engine: ${s.contentOpportunities.openCount > 0 || s.contentOpportunities.doneThisMonthCount > 0 ? "active" : "needs generation"}`,
+  );
+  lines.push(
+    `- Phase 6 Partnerships & reporting polish: ${s.partnerships.doneCount > 0 || s.partnerships.inProgressCount > 0 ? "active" : "starting"}`,
+  );
+  lines.push("");
+  lines.push(`## Completed This Month (${labelShort})`);
+  lines.push(`- Fix tasks completed: ${s.doneFixesThisMonth.length}`);
+  lines.push(`- Growth tasks completed: ${s.growth.doneThisMonthCount}`);
+  lines.push(`- Content opportunities completed: ${s.contentOpportunities.doneThisMonthCount}`);
+  lines.push(`- Partnership activities logged: ${s.partnerships.activityThisMonthCount}`);
+  lines.push("");
+  lines.push("## Next Priorities");
+  lines.push(`1. Clear the top ${Math.min(3, s.openFixTasks.length)} open SEO fix tasks and protect readiness.`);
+  lines.push("2. Publish one high-intent content opportunity and one FAQ/schema update.");
+  lines.push("3. Progress two partnership items (directories + one referral/byline channel).");
+  lines.push("4. Re-run Lighthouse and target green bands across primary scores.");
+  lines.push("");
+  return lines.join("\n");
+}
+
 export function renderSiteReportTemplate(id: ReportTemplateId, snapshot: SiteReportSnapshot): string {
   switch (id) {
     case "monthly_seo":
@@ -285,5 +329,7 @@ export function renderSiteReportTemplate(id: ReportTemplateId, snapshot: SiteRep
       return renderGeoFocus(snapshot);
     case "launch_readiness":
       return renderLaunchReadiness(snapshot);
+    case "monthly_ops":
+      return renderMonthlyOps(snapshot);
   }
 }

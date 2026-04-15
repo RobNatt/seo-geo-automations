@@ -1,20 +1,6 @@
 /**
- * Launch blockers — issues that match the app’s “not ready to go live” bar
- * (same bar as `evaluateLaunchReadinessSummary` → `ready`).
- *
- * Rules (all that apply, fixed order):
- * 1. No homepage linked.
- * 2. No latest homepage audit run.
- * 3. Latest run status `running`.
- * 4. Onboarding stage `blocked`.
- * 5. Latest run status `failed`.
- * 6. Audit summary parse/error (`summaryHasError`).
- * 7. Any check row `fail` / `error` (keys from results, sorted).
- * 8. Any check row `warn` (keys from results, sorted).
- * 9. Each launch checklist item not marked done (title = checklist label).
- * 10. Each open fix task (title = task title).
- *
- * No inference beyond these inputs — only listed facts.
+ * Launch blockers — issues that truly block the ready-to-go-live state.
+ * Warnings are collected separately (see `collectLaunchWarnings`).
  */
 
 export type LaunchBlocker = {
@@ -22,6 +8,18 @@ export type LaunchBlocker = {
   title: string;
   detail?: string;
 };
+
+export type LaunchWarning = {
+  id: string;
+  title: string;
+  detail?: string;
+};
+
+/**
+ * Checks that default to advisory (warning-only), even if returned as fail/error.
+ * They can be promoted to blockers via `hardBlockerCheckKeys`.
+ */
+export const WARNING_ONLY_CHECK_KEYS = new Set<string>(["geo_area_note_visible"]);
 
 export type CollectLaunchBlockersInput = {
   hasHomepage: boolean;
@@ -31,8 +29,46 @@ export type CollectLaunchBlockersInput = {
   summaryErrorMessage: string | null;
   auditResults: { checkKey: string; status: string }[];
   checklistUndone: { key: string; label: string }[];
-  openFixTasks: { dedupeKey: string; title: string }[];
+  openFixTasks: { dedupeKey: string; title: string; blocksLaunch?: boolean }[];
+  /** Optional explicit overrides for warning-only checks that should block launch. */
+  hardBlockerCheckKeys?: string[];
 };
+
+function asSet(keys: string[] | undefined): Set<string> {
+  return new Set((keys ?? []).map((k) => k.trim()).filter(Boolean));
+}
+
+export function isHardBlockerCheckKey(checkKey: string, hardBlockerCheckKeys?: string[]): boolean {
+  if (!WARNING_ONLY_CHECK_KEYS.has(checkKey)) return true;
+  const overrides = asSet(hardBlockerCheckKeys);
+  return overrides.has(checkKey);
+}
+
+export function summarizeAuditHardFailures(
+  auditResults: { checkKey: string; status: string }[],
+  hardBlockerCheckKeys?: string[],
+): string[] {
+  return [...auditResults]
+    .filter((r) => (r.status === "fail" || r.status === "error") && isHardBlockerCheckKey(r.checkKey, hardBlockerCheckKeys))
+    .map((r) => r.checkKey)
+    .sort((a, b) => a.localeCompare(b));
+}
+
+export function summarizeAuditWarnings(
+  auditResults: { checkKey: string; status: string }[],
+  hardBlockerCheckKeys?: string[],
+): string[] {
+  return [...auditResults]
+    .filter((r) => {
+      if (r.status === "warn") return true;
+      if (r.status === "fail" || r.status === "error") {
+        return !isHardBlockerCheckKey(r.checkKey, hardBlockerCheckKeys);
+      }
+      return false;
+    })
+    .map((r) => r.checkKey)
+    .sort((a, b) => a.localeCompare(b));
+}
 
 export function collectLaunchBlockers(input: CollectLaunchBlockersInput): LaunchBlocker[] {
   const out: LaunchBlocker[] = [];
@@ -86,26 +122,12 @@ export function collectLaunchBlockers(input: CollectLaunchBlockersInput): Launch
     });
   }
 
-  const sortedResults = [...input.auditResults].sort((a, b) =>
-    a.checkKey.localeCompare(b.checkKey),
-  );
-  const failKeys = sortedResults
-    .filter((r) => r.status === "fail" || r.status === "error")
-    .map((r) => r.checkKey);
+  const failKeys = summarizeAuditHardFailures(input.auditResults, input.hardBlockerCheckKeys);
   if (failKeys.length > 0) {
     out.push({
       id: "audit_check_failures",
       title: "Failed checks on latest audit",
       detail: failKeys.join(", "),
-    });
-  }
-
-  const warnKeys = sortedResults.filter((r) => r.status === "warn").map((r) => r.checkKey);
-  if (warnKeys.length > 0) {
-    out.push({
-      id: "audit_check_warnings",
-      title: "Warnings on latest audit",
-      detail: warnKeys.join(", "),
     });
   }
 
@@ -117,6 +139,7 @@ export function collectLaunchBlockers(input: CollectLaunchBlockersInput): Launch
   }
 
   for (const t of input.openFixTasks) {
+    if (t.blocksLaunch === false) continue;
     out.push({
       id: `open_fix:${t.dedupeKey}`,
       title: t.title,
@@ -124,4 +147,19 @@ export function collectLaunchBlockers(input: CollectLaunchBlockersInput): Launch
   }
 
   return out;
+}
+
+export function collectLaunchWarnings(input: {
+  auditResults: { checkKey: string; status: string }[];
+  hardBlockerCheckKeys?: string[];
+}): LaunchWarning[] {
+  const warnKeys = summarizeAuditWarnings(input.auditResults, input.hardBlockerCheckKeys);
+  if (warnKeys.length === 0) return [];
+  return [
+    {
+      id: "audit_check_warnings",
+      title: "Advisory warnings on latest audit",
+      detail: warnKeys.join(", "),
+    },
+  ];
 }

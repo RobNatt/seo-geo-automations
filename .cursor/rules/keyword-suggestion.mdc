@@ -1,0 +1,44 @@
+---
+description: Low-barrier keyword suggestion rules
+globs: "**/*keyword*.ts,**/lib/keywords/**"
+alwaysApply: true
+---
+
+# Keyword Suggestion Rules
+
+## Priority order
+
+1. **Service + long-tail** (example: `emergency plumbing Omaha drain cleaning`)
+2. **Local service** (example: `web design Omaha small business`)
+3. **Question intent** (example: `how long does drain cleaning take`)
+4. **Branded service** (example: `N-Tech web design Omaha`)
+5. **Outcome-based** (example: `grow leads with SEO GEO`)
+
+## Local vs national keywords
+
+- **Local-first:** Always qualify with city/metro.
+- **National:** Service terms only unless page is location-specific.
+- **Dual:** Offer both local-qualified and national service-intent options.
+
+## Opportunity scoring
+
+- **Relevance to services:** 50%
+- **Likely low competition:** 30% (long-tail, specific modifiers)
+- **Clear commercial intent:** 20%
+
+## Output format
+
+- Return exactly **3 ranked keyword options**.
+- For each option include:
+  - `keyword`
+  - `relevanceScore` (0-100)
+  - `opportunityScore` (0-100)
+  - `intentScore` (0-100)
+  - `weightedScore` (0-100, from the rule above)
+  - `reasoning` (1-2 sentences, deterministic and explainable)
+
+- If `marketFocus = dual`, ensure at least:
+  - one local-qualified option
+  - one broader/national option
+
+- Avoid generic head terms unless explicitly provided as a priority keyword in the brief.

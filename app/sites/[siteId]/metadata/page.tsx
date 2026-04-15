@@ -2,17 +2,13 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import {
   applyPageMetadataForm,
-  pageLooksLikeHomepage,
+  previewSiteSuggestionsForm,
   updateSiteSeoBriefForm,
+  loadPreviewSuggestions,
 } from "@/app/actions/seo-metadata";
+import { PAGE_TYPES, type PageType } from "@/lib/metadata";
+import { buildSiteBriefFromSite } from "@/lib/site-brief";
 import { prisma } from "@/lib/db";
-import {
-  buildMetadataSuggestions,
-  mergePrimaryServiceNames,
-  parseMarketFocus,
-  parsePageType,
-  PAGE_TYPES,
-} from "@/lib/seo/metadata-suggestions";
 
 export const dynamic = "force-dynamic";
 
@@ -21,84 +17,43 @@ export default async function SiteMetadataPage({
   searchParams,
 }: {
   params: Promise<{ siteId: string }>;
-  searchParams: Promise<{
-    msg?: string;
-    pageId?: string;
-    pageType?: string;
-    blogTopic?: string;
-    location?: string;
-  }>;
+  searchParams: Promise<{ msg?: string; pageId?: string; pageType?: string; topicHint?: string }>;
 }) {
   const { siteId } = await params;
   const sp = await searchParams;
   const msg = sp.msg?.trim();
 
-  const site = await prisma.site.findUnique({
-    where: { id: siteId },
-  });
+  const site = await prisma.site.findUnique({ where: { id: siteId } });
   if (!site) notFound();
 
-  const [pages, pagesForNames] = await Promise.all([
-    prisma.page.findMany({
-      where: { siteId },
-      orderBy: { createdAt: "asc" },
-      include: { service: true },
-    }),
-    prisma.page.findMany({
-      where: { siteId },
-      select: { service: { select: { name: true } } },
-    }),
-  ]);
+  const brief = buildSiteBriefFromSite(site);
+  const pages = await prisma.page.findMany({
+    where: { siteId },
+    orderBy: { createdAt: "asc" },
+    include: { service: true },
+  });
 
-  const catalogNames = pagesForNames
-    .map((p) => p.service?.name)
-    .filter((n): n is string => Boolean(n));
-
-  const brief = {
-    businessName: site.businessName,
-    primaryServices: mergePrimaryServiceNames(site.primaryFocus, catalogNames),
-    targetAudience: site.targetAudience ?? "",
-    marketFocus: parseMarketFocus(site.marketFocus),
-    serviceAreaOrLocation: site.geoHint ?? "",
-    primaryConversionGoal: site.primaryConversionGoal ?? "",
-    priorityKeyword: site.priorityKeyword ?? undefined,
-  };
-
-  const previewPageId = sp.pageId?.trim() ?? "";
-  const previewPageType = parsePageType(sp.pageType);
-  const blogTopicHint = sp.blogTopic?.trim() || undefined;
-  const locationOverride = sp.location?.trim() || undefined;
-
-  const previewPage = previewPageId
-    ? pages.find((p) => p.id === previewPageId) ?? null
-    : null;
-
-  const suggestions =
-    previewPage && previewPageType
-      ? buildMetadataSuggestions(brief, {
-          pageType: previewPageType,
-          linkedServiceName: previewPage.service?.name ?? null,
-          blogTopicHint,
-          locationOverride,
+  const pageType = PAGE_TYPES.includes((sp.pageType ?? "") as PageType) ? (sp.pageType as PageType) : null;
+  const preview =
+    sp.pageId && pageType
+      ? await loadPreviewSuggestions({
+          siteId,
+          pageId: sp.pageId,
+          pageType,
+          topicHint: sp.topicHint?.trim() || undefined,
         })
       : null;
 
-  const homepageHint =
-    previewPage && site.rootUrl
-      ? pageLooksLikeHomepage(site.rootUrl, previewPage.url)
-      : false;
-
   return (
-    <main className="mx-auto max-w-3xl px-4 py-10">
+    <main className="mx-auto max-w-4xl px-4 py-10">
       <p className="text-sm text-zinc-500">
         <Link href={`/sites/${siteId}`} className="text-zinc-700 underline dark:text-zinc-300">
           ← Back to site
         </Link>
       </p>
-      <h1 className="mt-4 text-xl font-semibold">Metadata &amp; keyword suggestions</h1>
+      <h1 className="mt-4 text-xl font-semibold">Metadata and keyword suggestions</h1>
       <p className="mt-2 text-sm text-zinc-600 dark:text-zinc-400">
-        Rule-based copy from your onboarding brief and page type. URLs are not used as the primary signal. Nothing
-        is written to the database until you confirm below.
+        Deterministic suggestions from your onboarding brief, page type, and market focus. Nothing auto-applies.
       </p>
 
       {msg ? (
@@ -107,100 +62,115 @@ export default async function SiteMetadataPage({
         </p>
       ) : null}
 
-      <section className="mt-10 rounded-lg border border-zinc-200 bg-white p-6 dark:border-zinc-800 dark:bg-zinc-900">
-        <h2 className="text-sm font-medium text-zinc-800 dark:text-zinc-100">Business brief (source of truth)</h2>
-        <p className="mt-1 text-xs text-zinc-500">
-          Filled at onboarding or here. Drives titles, meta descriptions, and keyword strategy.
-        </p>
-        <form action={updateSiteSeoBriefForm} className="mt-4 space-y-4">
+      <section className="mt-8 rounded-lg border border-zinc-200 bg-white p-6 dark:border-zinc-800 dark:bg-zinc-900">
+        <h2 className="text-sm font-medium text-zinc-800 dark:text-zinc-100">Site brief</h2>
+        <form action={updateSiteSeoBriefForm} className="mt-4 space-y-3">
           <input type="hidden" name="siteId" value={siteId} />
           <label className="flex flex-col gap-1 text-sm">
-            <span className="text-zinc-600 dark:text-zinc-400">Target audience</span>
-            <input
-              name="targetAudience"
-              defaultValue={site.targetAudience ?? ""}
-              placeholder="Who you serve"
+            <span>Primary services (comma/new-line)</span>
+            <textarea
+              name="primaryServices"
+              rows={2}
+              defaultValue={brief.primaryServices.join(", ")}
               className="rounded border border-zinc-300 bg-white px-3 py-2 dark:border-zinc-700 dark:bg-zinc-950"
             />
           </label>
           <label className="flex flex-col gap-1 text-sm">
-            <span className="text-zinc-600 dark:text-zinc-400">Market focus</span>
+            <span>Target audience</span>
+            <input
+              name="targetAudience"
+              defaultValue={brief.targetAudience}
+              className="rounded border border-zinc-300 bg-white px-3 py-2 dark:border-zinc-700 dark:bg-zinc-950"
+            />
+          </label>
+          <label className="flex flex-col gap-1 text-sm">
+            <span>Market focus</span>
             <select
               name="marketFocus"
-              defaultValue={site.marketFocus ?? ""}
+              defaultValue={brief.marketFocus}
               className="rounded border border-zinc-300 bg-white px-3 py-2 dark:border-zinc-700 dark:bg-zinc-950"
             >
-              <option value="">— Select —</option>
-              <option value="local">Local</option>
-              <option value="regional">Regional</option>
-              <option value="national">National</option>
+              <option value="local">local</option>
+              <option value="regional">regional</option>
+              <option value="national">national</option>
+              <option value="dual">dual</option>
             </select>
           </label>
           <label className="flex flex-col gap-1 text-sm">
-            <span className="text-zinc-600 dark:text-zinc-400">Service area / location</span>
-            <input
-              name="geoHint"
-              defaultValue={site.geoHint ?? ""}
-              placeholder="City, region, or service area"
+            <span>Service area (comma/new-line)</span>
+            <textarea
+              name="serviceArea"
+              rows={2}
+              defaultValue={brief.serviceArea.join(", ")}
               className="rounded border border-zinc-300 bg-white px-3 py-2 dark:border-zinc-700 dark:bg-zinc-950"
             />
           </label>
           <label className="flex flex-col gap-1 text-sm">
-            <span className="text-zinc-600 dark:text-zinc-400">Primary conversion goal</span>
+            <span>Primary conversion goal</span>
             <input
               name="primaryConversionGoal"
-              defaultValue={site.primaryConversionGoal ?? ""}
-              placeholder="e.g. calls, form leads, bookings"
+              defaultValue={brief.primaryConversionGoal}
               className="rounded border border-zinc-300 bg-white px-3 py-2 dark:border-zinc-700 dark:bg-zinc-950"
             />
           </label>
           <label className="flex flex-col gap-1 text-sm">
-            <span className="text-zinc-600 dark:text-zinc-400">Priority keyword (optional)</span>
+            <span>Brand tone</span>
+            <select
+              name="brandTone"
+              defaultValue={brief.brandTone}
+              className="rounded border border-zinc-300 bg-white px-3 py-2 dark:border-zinc-700 dark:bg-zinc-950"
+            >
+              <option value="professional">professional</option>
+              <option value="friendly">friendly</option>
+              <option value="technical">technical</option>
+              <option value="outcome-led">outcome-led</option>
+            </select>
+          </label>
+          <label className="flex flex-col gap-1 text-sm">
+            <span>Optional priority keyword</span>
             <input
-              name="priorityKeyword"
-              defaultValue={site.priorityKeyword ?? ""}
+              name="optionalPriorityKeyword"
+              defaultValue={brief.optionalPriorityKeyword ?? ""}
               className="rounded border border-zinc-300 bg-white px-3 py-2 font-mono text-xs dark:border-zinc-700 dark:bg-zinc-950"
             />
           </label>
-          <button
-            type="submit"
-            className="rounded bg-zinc-900 px-4 py-2 text-sm font-medium text-white dark:bg-zinc-100 dark:text-zinc-900"
-          >
+          <label className="flex flex-col gap-1 text-sm">
+            <span>Legacy GEO hint (optional)</span>
+            <input
+              name="geoHint"
+              defaultValue={site.geoHint ?? ""}
+              className="rounded border border-zinc-300 bg-white px-3 py-2 dark:border-zinc-700 dark:bg-zinc-950"
+            />
+          </label>
+          <button className="rounded bg-zinc-900 px-4 py-2 text-sm font-medium text-white dark:bg-zinc-100 dark:text-zinc-900">
             Save brief
           </button>
         </form>
       </section>
 
-      <section className="mt-10 rounded-lg border border-zinc-200 bg-white p-6 dark:border-zinc-800 dark:bg-zinc-900">
-        <h2 className="text-sm font-medium text-zinc-800 dark:text-zinc-100">Preview suggestions</h2>
-        <p className="mt-1 text-xs text-zinc-500">
-          Pick a page and page type. Optional hints refine blog and location templates. Then preview; apply is a
-          separate step.
-        </p>
-
-        <form method="get" className="mt-4 space-y-4">
+      <section className="mt-8 rounded-lg border border-zinc-200 bg-white p-6 dark:border-zinc-800 dark:bg-zinc-900">
+        <h2 className="text-sm font-medium text-zinc-800 dark:text-zinc-100">Preview and confirm</h2>
+        <form action={previewSiteSuggestionsForm} className="mt-4 space-y-3">
+          <input type="hidden" name="siteId" value={siteId} />
           <label className="flex flex-col gap-1 text-sm">
-            <span className="text-zinc-600 dark:text-zinc-400">Page</span>
+            <span>Page</span>
             <select
               name="pageId"
-              required
-              defaultValue={previewPageId}
+              defaultValue={sp.pageId ?? ""}
               className="rounded border border-zinc-300 bg-white px-3 py-2 font-mono text-xs dark:border-zinc-700 dark:bg-zinc-950"
             >
               <option value="">— Choose —</option>
               {pages.map((p) => (
                 <option key={p.id} value={p.id}>
                   {p.url}
-                  {p.service ? ` · ${p.service.name}` : ""}
                 </option>
               ))}
             </select>
           </label>
           <label className="flex flex-col gap-1 text-sm">
-            <span className="text-zinc-600 dark:text-zinc-400">Page type (strategy)</span>
+            <span>Page type</span>
             <select
               name="pageType"
-              required
               defaultValue={sp.pageType ?? ""}
               className="rounded border border-zinc-300 bg-white px-3 py-2 dark:border-zinc-700 dark:bg-zinc-950"
             >
@@ -213,99 +183,69 @@ export default async function SiteMetadataPage({
             </select>
           </label>
           <label className="flex flex-col gap-1 text-sm">
-            <span className="text-zinc-600 dark:text-zinc-400">Blog / support topic hint (optional)</span>
+            <span>Topic hint (for blog pages)</span>
             <input
-              name="blogTopic"
-              defaultValue={sp.blogTopic ?? ""}
-              placeholder="e.g. How to winterize outdoor lines"
+              name="topicHint"
+              defaultValue={sp.topicHint ?? ""}
               className="rounded border border-zinc-300 bg-white px-3 py-2 dark:border-zinc-700 dark:bg-zinc-950"
             />
           </label>
-          <label className="flex flex-col gap-1 text-sm">
-            <span className="text-zinc-600 dark:text-zinc-400">Location override (optional)</span>
-            <input
-              name="location"
-              defaultValue={sp.location ?? ""}
-              placeholder="Overrides GEO hint for location pages only"
-              className="rounded border border-zinc-300 bg-white px-3 py-2 dark:border-zinc-700 dark:bg-zinc-950"
-            />
-          </label>
-          <button
-            type="submit"
-            className="rounded border border-zinc-300 bg-white px-4 py-2 text-sm font-medium dark:border-zinc-600 dark:bg-zinc-900"
-          >
-            Preview suggestions
+          <button className="rounded border border-zinc-300 px-4 py-2 text-sm font-medium dark:border-zinc-600">
+            Generate suggestions
           </button>
         </form>
 
-        {homepageHint && previewPageType && previewPageType !== "homepage" ? (
-          <p className="mt-4 text-xs text-amber-800 dark:text-amber-200">
-            Note: This URL matches the site homepage, but the selected page type is not “homepage”. Strategy follows
-            your selection, not the URL alone.
-          </p>
-        ) : null}
-
-        {suggestions && previewPage && previewPageType ? (
-          <div className="mt-8 space-y-6 border-t border-zinc-200 pt-6 dark:border-zinc-800">
-            <p className="text-xs font-medium uppercase tracking-wide text-zinc-500">Confidence</p>
-            <p className="text-sm text-zinc-700 dark:text-zinc-300">{suggestions.confidenceNote}</p>
+        {preview ? (
+          <div className="mt-6 space-y-6 border-t border-zinc-200 pt-6 dark:border-zinc-800">
+            <p className="text-xs text-zinc-500">{preview.brief.geoAreaNoteVisible || site.geoAreaNoteVisible}</p>
 
             <div>
-              <p className="text-xs font-medium uppercase tracking-wide text-zinc-500">Suggested title</p>
-              <p className="mt-1 text-sm font-medium text-zinc-900 dark:text-zinc-100">{suggestions.suggestedTitle}</p>
-              <p className="mt-2 text-xs leading-relaxed text-zinc-600 dark:text-zinc-400">
-                {suggestions.titleReasoning}
-              </p>
-            </div>
+              <h3 className="text-sm font-medium">Metadata options (choose one)</h3>
+              <form action={applyPageMetadataForm} className="mt-3 space-y-4">
+                <input type="hidden" name="siteId" value={siteId} />
+                <input type="hidden" name="pageId" value={preview.page.id} />
+                <input type="hidden" name="pageType" value={pageType ?? ""} />
+                {sp.topicHint ? <input type="hidden" name="topicHint" value={sp.topicHint} /> : null}
 
-            <div>
-              <p className="text-xs font-medium uppercase tracking-wide text-zinc-500">Suggested meta description</p>
-              <p className="mt-1 text-sm text-zinc-800 dark:text-zinc-200">{suggestions.suggestedMetaDescription}</p>
-              <p className="mt-2 text-xs leading-relaxed text-zinc-600 dark:text-zinc-400">
-                {suggestions.metaReasoning}
-              </p>
-            </div>
-
-            <div>
-              <p className="text-xs font-medium uppercase tracking-wide text-zinc-500">Keyword options (ranked)</p>
-              <ol className="mt-2 list-decimal space-y-3 pl-5 text-sm text-zinc-800 dark:text-zinc-200">
-                {suggestions.keywords.map((k) => (
-                  <li key={k.phrase}>
-                    <span className="font-medium">{k.phrase}</span>
-                    <span className="ml-2 text-xs text-zinc-500">
-                      relevance {k.relevanceScore} · opportunity {k.opportunityScore} · intent {k.intent} · rank{" "}
-                      {k.rankScore}
-                    </span>
-                    <p className="mt-1 text-xs leading-relaxed text-zinc-600 dark:text-zinc-400">{k.reasoning}</p>
-                  </li>
+                {preview.metadataOptions.map((opt, idx) => (
+                  <label key={`${opt.title}-${idx}`} className="block rounded border border-zinc-200 p-3 dark:border-zinc-700">
+                    <div className="flex items-start gap-2">
+                      <input type="radio" name="selectedOption" value={String(idx)} defaultChecked={idx === 0} />
+                      <div className="space-y-1">
+                        <p className="text-sm font-medium text-zinc-900 dark:text-zinc-100">{opt.title}</p>
+                        <p className="text-sm text-zinc-700 dark:text-zinc-300">{opt.metaDescription}</p>
+                        <p className="text-xs text-zinc-500">{opt.reasoning}</p>
+                        <p className="text-xs text-zinc-500">{opt.fitNote}</p>
+                      </div>
+                    </div>
+                  </label>
                 ))}
-              </ol>
+
+                <div>
+                  <p className="text-sm font-medium">Keyword options (ranked)</p>
+                  <ol className="mt-2 list-decimal space-y-2 pl-5 text-sm">
+                    {preview.keywordOptions.map((k) => (
+                      <li key={k.keyword}>
+                        <p className="font-medium">{k.keyword}</p>
+                        <p className="text-xs text-zinc-500">
+                          relevance {k.relevanceScore} · opportunity {k.opportunityScore} · intent {k.intentScore} ·
+                          weighted {k.weightedScore}
+                        </p>
+                        <p className="text-xs text-zinc-500">{k.reasoning}</p>
+                      </li>
+                    ))}
+                  </ol>
+                </div>
+
+                <label className="flex items-start gap-2 text-sm">
+                  <input type="checkbox" name="confirmed" value="1" className="mt-1" />
+                  <span>I confirm this metadata option should be applied to the page. (Keywords are suggestions only.)</span>
+                </label>
+                <button className="rounded bg-zinc-900 px-4 py-2 text-sm font-medium text-white dark:bg-zinc-100 dark:text-zinc-900">
+                  Apply selected option
+                </button>
+              </form>
             </div>
-
-            <p className="rounded-md border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm text-zinc-800 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-200">
-              {suggestions.confirmPrompt}
-            </p>
-
-            <form action={applyPageMetadataForm} className="space-y-4 border-t border-zinc-200 pt-6 dark:border-zinc-800">
-              <input type="hidden" name="siteId" value={siteId} />
-              <input type="hidden" name="pageId" value={previewPage.id} />
-              <input type="hidden" name="pageType" value={previewPageType} />
-              {blogTopicHint ? <input type="hidden" name="blogTopicHint" value={blogTopicHint} /> : null}
-              {locationOverride ? <input type="hidden" name="locationOverride" value={locationOverride} /> : null}
-              <label className="flex cursor-pointer items-start gap-2 text-sm text-zinc-800 dark:text-zinc-200">
-                <input type="checkbox" name="confirmed" value="1" className="mt-1" />
-                <span>
-                  I reviewed the suggested title and meta description and want to save them to this page (keywords are
-                  suggestions only and are not stored automatically).
-                </span>
-              </label>
-              <button
-                type="submit"
-                className="rounded bg-zinc-900 px-4 py-2 text-sm font-medium text-white dark:bg-zinc-100 dark:text-zinc-900"
-              >
-                Apply title, meta description &amp; page type
-              </button>
-            </form>
           </div>
         ) : null}
       </section>

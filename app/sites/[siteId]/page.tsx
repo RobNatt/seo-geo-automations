@@ -4,6 +4,26 @@ import { notFound } from "next/navigation";
 import { Suspense } from "react";
 import { setLaunchCheckItemForm } from "@/app/actions/launch-checklist";
 import {
+  completeContentOpportunityForm,
+  dismissContentOpportunityForm,
+  generateContentOpportunitiesForm,
+  planContentOpportunityForm,
+} from "@/app/actions/content-opportunities";
+import {
+  markGrowthTaskDoneForm,
+  runGrowthCadenceScanForm,
+} from "@/app/actions/growth-cadence";
+import {
+  markMaintenanceAlertResolvedForm,
+  runMaintenanceScanForm,
+} from "@/app/actions/maintenance-alerts";
+import {
+  logPartnershipActivityForm,
+  updatePartnershipForm,
+} from "@/app/actions/partnerships";
+import { runHomepagePerformanceAuditForm } from "@/app/actions/performance-audit";
+import { applyPageMetadataForm } from "@/app/actions/seo-metadata";
+import {
   completeSiteFixTaskForm,
   createFixTaskFromCheckForm,
 } from "@/app/actions/site-fix-tasks";
@@ -20,6 +40,7 @@ import { FixTaskOpenLink } from "@/components/FixTaskOpenLink";
 import { FixRecommendations } from "@/components/FixRecommendations";
 import { PostActionScrollFocus } from "@/components/PostActionScrollFocus";
 import { LaunchBlockersSection } from "@/components/LaunchBlockersSection";
+import { LaunchWarningsSection } from "@/components/LaunchWarningsSection";
 import { prisma } from "@/lib/db";
 import {
   formatRunSummary,
@@ -35,6 +56,7 @@ import {
   ensureLaunchChecklistForSite,
   LAUNCH_CHECKLIST_DEF,
   mergeLaunchChecklistRows,
+  SET_FORGET_BASELINE_KEYS,
 } from "@/lib/sites/launch-checklist";
 import {
   groupOpenFixTasksByWorkflow,
@@ -45,17 +67,16 @@ import {
 import { tryParseOpportunityTaskDedupe } from "@/lib/fix-tasks/opportunity-task";
 import { evaluateLaunchReadinessSummary } from "@/lib/sites/launch-readiness-rules";
 import { recommendedActionsForReadinessState } from "@/lib/sites/readiness-recommended-actions";
-import { readinessSummaryStateBadgeClass } from "@/lib/sites/readiness-display";
-import { collectLaunchBlockers } from "@/lib/sites/launch-blockers";
+import {
+  collectLaunchBlockers,
+  collectLaunchWarnings,
+  summarizeAuditHardFailures,
+} from "@/lib/sites/launch-blockers";
 import {
   buildNextBestAction,
   nextBestActionModeLabel,
 } from "@/lib/sites/next-best-action";
 import { buildNextActionPanel } from "@/lib/sites/next-action-panel";
-import {
-  SITE_STAGE_LABEL,
-  isSiteOnboardingStage,
-} from "@/lib/sites/onboarding-stage";
 import { rankContentGapOpportunities } from "@/lib/sites/content-gap-rank";
 import {
   buildSiteGrowthOpportunities,
@@ -71,41 +92,205 @@ import {
   renderSiteReportTemplate,
 } from "@/lib/sites/report-templates";
 import { isWhiteLabelSiteSummaryMode } from "@/lib/sites/whitelabel-site-summary";
+import { buildKeywordSuggestions } from "@/lib/keywords";
+import { buildMetadataOptions, PAGE_TYPES, type PageType } from "@/lib/metadata";
+import { buildSiteBriefFromSite } from "@/lib/site-brief";
+import { scoreColor, isOlderThanDays } from "@/lib/sites/performance-audit";
+import { buildPerformanceGuidance } from "@/lib/sites/performance-guidance";
+import { MAINTENANCE_TRIGGER_COPY } from "@/lib/maintenance-rules";
+import { ensurePartnershipChecklistForSite } from "@/lib/partnerships";
 
 export const dynamic = "force-dynamic";
 
 /** Vercel Pro+: raises the default ~10s cap so this data-heavy page can finish. Hobby tier still caps at 10s. */
 export const maxDuration = 60;
 
+function parseKeywords(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter((v): v is string => typeof v === "string").map((v) => v.trim()).filter(Boolean).slice(0, 3);
+}
+
+function readinessPillClass(state: string): string {
+  if (state === "ready") return "border-[#10b981]/30 bg-[#10b981]/10 text-[#10b981]";
+  if (state === "nearly_ready") return "border-[#f59e0b]/30 bg-[#f59e0b]/10 text-[#f59e0b]";
+  return "border-[#ef4444]/30 bg-[#ef4444]/10 text-[#ef4444]";
+}
+
+function scoreChipClass(score: number | null): string {
+  if (score == null) return "border-zinc-300 bg-zinc-100 text-zinc-600 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-300";
+  if (score >= 90) return "border-[#10b981]/30 bg-[#10b981]/10 text-[#10b981]";
+  if (score >= 70) return "border-[#f59e0b]/30 bg-[#f59e0b]/10 text-[#f59e0b]";
+  return "border-[#ef4444]/30 bg-[#ef4444]/10 text-[#ef4444]";
+}
+
+function growthTaskHref(siteId: string, taskKey: string): string {
+  switch (taskKey) {
+    case "gsc_performance_snapshot":
+      return "#open-fix-tasks";
+    case "core_web_vitals_sanity":
+      return "#launch-checklist";
+    case "publish_one_blog":
+      return `/sites/${siteId}`;
+    case "publish_or_update_topic_page":
+      return `/sites/${siteId}`;
+    case "internal_link_pass":
+      return `/sites/${siteId}`;
+    case "refresh_low_ctr_pages":
+      return `/sites/${siteId}`;
+    case "content_roi_review":
+      return `/sites/${siteId}`;
+    case "gbp_photos_refresh":
+      return "#launch-checklist";
+    case "topic_cluster_roadmap":
+      return `/sites/${siteId}`;
+    case "competitor_gap_summary":
+      return `/sites/${siteId}`;
+    default:
+      return `/sites/${siteId}`;
+  }
+}
+
 export default async function SiteSummaryPage({
   params,
   searchParams,
 }: {
   params: Promise<{ siteId: string }>;
-  searchParams: Promise<{ runId?: string; msg?: string; wl?: string; full?: string }>;
+  searchParams: Promise<{
+    runId?: string;
+    msg?: string;
+    wl?: string;
+    full?: string;
+    clientView?: string;
+    seoPageId?: string;
+    seoPageType?: string;
+    seoTopicHint?: string;
+  }>;
 }) {
   const { siteId } = await params;
-  const { runId: runIdParam, msg, wl, full } = await searchParams;
+  const { runId: runIdParam, msg, wl, full, clientView, seoPageId, seoPageType, seoTopicHint } = await searchParams;
 
   const site = await prisma.site.findUnique({
     where: { id: siteId },
   });
   if (!site) notFound();
 
+  const now = new Date();
+  const monthStart = new Date(Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth(), 1));
+  const weekEnd = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
+  const monthEnd = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
+  await ensurePartnershipChecklistForSite(site.id);
+
+  const [activeMaintenanceAlerts, maintenanceAlertsThisMonth, dueThisWeekRaw, dueThisMonthRaw, topContentOpportunities, partnerships] = await Promise.all([
+    prisma.maintenanceAlert.findMany({
+      where: { siteId: site.id, status: "active" },
+      orderBy: [{ priority: "asc" }, { createdAt: "desc" }],
+    }),
+    prisma.maintenanceAlert.count({
+      where: { siteId: site.id, createdAt: { gte: monthStart } },
+    }),
+    prisma.growthTask.findMany({
+      where: {
+        siteId: site.id,
+        status: "pending",
+        dueDate: { lte: weekEnd },
+      },
+      orderBy: [{ dueDate: "asc" }, { priority: "asc" }, { createdAt: "asc" }],
+      take: 3,
+    }),
+    prisma.growthTask.findMany({
+      where: {
+        siteId: site.id,
+        status: "pending",
+        dueDate: { lte: monthEnd },
+      },
+      orderBy: [{ dueDate: "asc" }, { priority: "asc" }, { createdAt: "asc" }],
+      take: 8,
+    }),
+    prisma.contentOpportunity.findMany({
+      where: { siteId: site.id, status: { in: ["identified", "planned", "active"] } },
+      orderBy: [{ priority: "asc" }, { createdAt: "desc" }],
+      take: 3,
+    }),
+    prisma.partnership.findMany({
+      where: { siteId: site.id },
+      orderBy: [{ type: "asc" }, { partnerName: "asc" }],
+    }),
+  ]);
+  const dueThisWeek = dueThisWeekRaw.slice(0, 3);
+  const dueThisMonth = dueThisMonthRaw.slice(0, 5);
+
   await ensureLaunchChecklistForSite(site.id);
-  const [launchRows, homepage] = await Promise.all([
+  const [launchRows, homepage, sitePages] = await Promise.all([
     prisma.siteLaunchCheckItem.findMany({
       where: { siteId: site.id },
     }),
     prisma.page.findFirst({
       where: { siteId: site.id },
       orderBy: { createdAt: "asc" },
+      include: { service: true },
+    }),
+    prisma.page.findMany({
+      where: { siteId: site.id },
+      orderBy: { createdAt: "asc" },
+      include: { service: true },
     }),
   ]);
   const launchItems = mergeLaunchChecklistRows(launchRows);
   const launchDone = launchItems.filter((i) => i.done).length;
   const launchTotal = LAUNCH_CHECKLIST_DEF.length;
   const launchPct = launchTotal ? Math.round((launchDone / launchTotal) * 100) : 0;
+  const setForgetItems = launchItems.filter((i) =>
+    (SET_FORGET_BASELINE_KEYS as readonly string[]).includes(i.key),
+  );
+  const setForgetDone = setForgetItems.filter((i) => i.done).length;
+  const setForgetTotal = setForgetItems.length;
+  const setForgetPct = setForgetTotal ? Math.round((setForgetDone / setForgetTotal) * 100) : 0;
+  const lighthouseScores = [
+    homepage?.performanceScore ?? null,
+    homepage?.accessibilityScore ?? null,
+    homepage?.bestPracticesScore ?? null,
+    homepage?.seoScore ?? null,
+  ].filter((v): v is number => typeof v === "number");
+  const lighthouseAvg =
+    lighthouseScores.length > 0 ? Math.round(lighthouseScores.reduce((sum, n) => sum + n, 0) / lighthouseScores.length) : null;
+  const checklistPercent = launchTotal > 0 ? Math.round((launchDone / launchTotal) * 100) : 0;
+  const activeAlertCount = activeMaintenanceAlerts.length;
+  const openGrowthTaskCount = dueThisMonthRaw.length;
+  const openPartnershipCount = partnerships.filter((p) => p.status !== "done").length;
+  const perfGuidance = buildPerformanceGuidance({
+    siteId: site.id,
+    performanceScore: homepage?.performanceScore ?? null,
+    seoScore: homepage?.seoScore ?? null,
+    accessibilityScore: homepage?.accessibilityScore ?? null,
+  });
+  const perfAuditStale = isOlderThanDays(homepage?.performanceLastAudited ?? null, 7);
+  const siteBrief = buildSiteBriefFromSite(site);
+  const selectedSeoPage =
+    sitePages.find((p) => p.id === (seoPageId ?? "").trim()) ??
+    homepage ??
+    sitePages[0] ??
+    null;
+  const parsedSeoType = (seoPageType ?? "").trim() as PageType;
+  const selectedSeoPageType: PageType =
+    PAGE_TYPES.includes(parsedSeoType) ? parsedSeoType : selectedSeoPage?.pageType && PAGE_TYPES.includes(selectedSeoPage.pageType as PageType)
+      ? (selectedSeoPage.pageType as PageType)
+      : selectedSeoPage && selectedSeoPage.url === site.rootUrl
+        ? "homepage"
+        : "service";
+  const seoMetadataOptions = selectedSeoPage
+    ? buildMetadataOptions({
+        brief: siteBrief,
+        pageType: selectedSeoPageType,
+        linkedService: selectedSeoPage.service?.name ?? null,
+        topicHint: seoTopicHint?.trim() || undefined,
+      })
+    : null;
+  const seoKeywords = selectedSeoPage
+    ? buildKeywordSuggestions({
+        brief: siteBrief,
+        pageKind: selectedSeoPageType === "blog" ? "blog-support" : "service",
+      })
+    : null;
 
   let openFixTasks: SiteFixTask[] = [];
   let latestRun = null;
@@ -146,17 +331,21 @@ export default async function SiteSummaryPage({
   const launchRemainingLabels = launchItems.filter((i) => !i.done).map((i) => i.label);
   const launchRemainingKeys = launchItems.filter((i) => !i.done).map((i) => i.key);
   const latestCounts = parseRunSummaryCounts(latestRun?.summary ?? null);
+  const latestAuditRows =
+    latestRun?.results?.map((r) => ({ checkKey: r.checkKey, status: r.status })) ?? [];
+  const hardFailCount = summarizeAuditHardFailures(latestAuditRows).length;
   const openFixTaskCount = openFixTasks.length;
+  const launchBlockingOpenFixTaskCount = openFixTasks.filter((t) => t.bucket === "immediate").length;
   const readinessSummary = evaluateLaunchReadinessSummary({
     hasHomepage: Boolean(homepage),
     latestRunStatus: latestRun?.status ?? null,
     onboardingStage: site.onboardingStage,
-    checkFailCount: latestCounts.fail,
+    checkFailCount: hardFailCount,
     checkWarnCount: latestCounts.warn,
     summaryHasError: latestCounts.hasError,
     launchDone,
     launchExpected: launchTotal,
-    openFixTaskCount,
+    openFixTaskCount: launchBlockingOpenFixTaskCount,
   });
   const nextPanel = buildNextActionPanel({
     hasHomepage: Boolean(homepage),
@@ -195,10 +384,16 @@ export default async function SiteSummaryPage({
     onboardingStage: site.onboardingStage,
     summaryHasError: latestCounts.hasError,
     summaryErrorMessage: parseSummaryErrorMessage(latestRun?.summary ?? null),
-    auditResults:
-      latestRun?.results?.map((r) => ({ checkKey: r.checkKey, status: r.status })) ?? [],
+    auditResults: latestAuditRows,
     checklistUndone: launchItems.filter((i) => !i.done).map((i) => ({ key: i.key, label: i.label })),
-    openFixTasks: openFixTasks.map((t) => ({ dedupeKey: t.dedupeKey, title: t.title })),
+    openFixTasks: openFixTasks.map((t) => ({
+      dedupeKey: t.dedupeKey,
+      title: t.title,
+      blocksLaunch: t.bucket === "immediate",
+    })),
+  });
+  const launchWarnings = collectLaunchWarnings({
+    auditResults: latestAuditRows,
   });
 
   const runInputs =
@@ -321,10 +516,11 @@ export default async function SiteSummaryPage({
         monthly_seo: renderSiteReportTemplate("monthly_seo", siteReportSnapshot),
         geo_focus: renderSiteReportTemplate("geo_focus", siteReportSnapshot),
         launch_readiness: renderSiteReportTemplate("launch_readiness", siteReportSnapshot),
+        monthly_ops: renderSiteReportTemplate("monthly_ops", siteReportSnapshot),
       }
     : null;
 
-  if (isWhiteLabelSiteSummaryMode({ wl, full })) {
+  if (isWhiteLabelSiteSummaryMode({ wl, full, clientView })) {
     const attentionTitles = launchBlockers.map((b) => b.title).slice(0, 12);
     const openTaskTitles = openFixTasks.slice(0, 10).map((t) => t.title);
     const latestAuditLine = latestRun
@@ -354,26 +550,42 @@ export default async function SiteSummaryPage({
   }
 
   return (
-    <main className="mx-auto max-w-5xl px-4 py-10">
+    <main className="mx-auto max-w-7xl px-6 py-10 lg:px-8">
       <Suspense fallback={null}>
         <PostActionScrollFocus variant="site" />
       </Suspense>
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <h1 className="text-xl font-semibold">{site.businessName}</h1>
-          <p className="mt-1 font-mono text-sm text-zinc-600 dark:text-zinc-400">{site.rootUrl}</p>
-          {site.geoHint ? (
-            <p className="mt-2 text-sm text-zinc-600 dark:text-zinc-400">
-              GEO: {site.geoHint}
+      <section className="rounded-2xl border border-zinc-200 bg-gradient-to-br from-white to-zinc-50 p-6 dark:border-zinc-800 dark:from-zinc-900 dark:to-zinc-950">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div className="max-w-3xl">
+            <div className="flex flex-wrap items-center gap-2">
+              <h1 className="text-2xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-50">{site.businessName}</h1>
+              <span
+                className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-medium ${readinessPillClass(readinessSummary.state)}`}
+              >
+                {readinessSummary.stateLabel}
+              </span>
+            </div>
+            <p className="mt-1 font-mono text-sm text-zinc-600 dark:text-zinc-400">{site.rootUrl}</p>
+            <p className="mt-3 text-sm text-zinc-700 dark:text-zinc-300">
+              <span className="font-medium">Next action:</span> {nextBestAction.headline}
             </p>
-          ) : null}
-          {site.primaryFocus ? (
-            <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">
-              Focus: {site.primaryFocus}
-            </p>
-          ) : null}
-        </div>
-        <div className="flex flex-wrap gap-2">
+            <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">{nextBestAction.detail}</p>
+            <div className="mt-4 grid grid-cols-1 gap-3 text-sm sm:grid-cols-3">
+              <div className="rounded-xl border border-zinc-200 bg-white/80 px-3 py-2 dark:border-zinc-700 dark:bg-zinc-900/70">
+                <p className="text-xs uppercase tracking-wide text-zinc-500">Checklist</p>
+                <p className="mt-1 font-semibold text-zinc-900 dark:text-zinc-100">{checklistPercent}% complete</p>
+              </div>
+              <div className="rounded-xl border border-zinc-200 bg-white/80 px-3 py-2 dark:border-zinc-700 dark:bg-zinc-900/70">
+                <p className="text-xs uppercase tracking-wide text-zinc-500">Lighthouse Avg</p>
+                <p className="mt-1 font-semibold text-zinc-900 dark:text-zinc-100">{lighthouseAvg ?? "—"}</p>
+              </div>
+              <div className="rounded-xl border border-zinc-200 bg-white/80 px-3 py-2 dark:border-zinc-700 dark:bg-zinc-900/70">
+                <p className="text-xs uppercase tracking-wide text-zinc-500">Open Tasks</p>
+                <p className="mt-1 font-semibold text-zinc-900 dark:text-zinc-100">{openFixTaskCount + openGrowthTaskCount}</p>
+              </div>
+            </div>
+          </div>
+          <div className="flex flex-wrap gap-2">
           <Link
             href="/onboard"
             className="rounded border border-zinc-300 px-3 py-1.5 text-sm dark:border-zinc-600"
@@ -401,62 +613,501 @@ export default async function SiteSummaryPage({
           >
             SEO metadata
           </Link>
-        </div>
-      </div>
-
-      <section className="mt-6 rounded-lg border border-zinc-200 bg-zinc-50 p-4 dark:border-zinc-800 dark:bg-zinc-900/80">
-        <h2 className="text-[11px] font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
-          Launch readiness summary
-        </h2>
-        <div className="mt-2 flex flex-wrap items-center gap-2">
-          <span
-            className={`inline-block rounded-full border px-2.5 py-0.5 text-sm font-medium ${readinessSummaryStateBadgeClass(readinessSummary.state)}`}
+          <Link
+            href={`/sites/${siteId}?clientView=1`}
+            className="rounded border border-zinc-300 px-3 py-1.5 text-sm dark:border-zinc-600"
           >
-            {readinessSummary.stateLabel}
-          </span>
+            Client view
+          </Link>
+          </div>
         </div>
-        <p className="mt-2 text-sm leading-snug text-zinc-800 dark:text-zinc-200">
-          {readinessSummary.nextStep}
+      </section>
+
+      <section className="mt-6 rounded-2xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
+        <div className="grid gap-3 lg:grid-cols-5">
+          <div className="rounded-xl border border-zinc-200 p-3 dark:border-zinc-700">
+            <p className="text-xs uppercase tracking-wide text-zinc-500">Performance</p>
+            <span className={`mt-1 inline-flex rounded-full border px-2 py-1 text-xs font-medium ${scoreChipClass(homepage?.performanceScore ?? null)}`}>
+              {homepage?.performanceScore ?? "—"}
+            </span>
+          </div>
+          <div className="rounded-xl border border-zinc-200 p-3 dark:border-zinc-700">
+            <p className="text-xs uppercase tracking-wide text-zinc-500">Accessibility</p>
+            <span className={`mt-1 inline-flex rounded-full border px-2 py-1 text-xs font-medium ${scoreChipClass(homepage?.accessibilityScore ?? null)}`}>
+              {homepage?.accessibilityScore ?? "—"}
+            </span>
+          </div>
+          <div className="rounded-xl border border-zinc-200 p-3 dark:border-zinc-700">
+            <p className="text-xs uppercase tracking-wide text-zinc-500">Best Practices</p>
+            <span className={`mt-1 inline-flex rounded-full border px-2 py-1 text-xs font-medium ${scoreChipClass(homepage?.bestPracticesScore ?? null)}`}>
+              {homepage?.bestPracticesScore ?? "—"}
+            </span>
+          </div>
+          <div className="rounded-xl border border-zinc-200 p-3 dark:border-zinc-700">
+            <p className="text-xs uppercase tracking-wide text-zinc-500">SEO</p>
+            <span className={`mt-1 inline-flex rounded-full border px-2 py-1 text-xs font-medium ${scoreChipClass(homepage?.seoScore ?? null)}`}>
+              {homepage?.seoScore ?? "—"}
+            </span>
+          </div>
+          <div className="rounded-xl border border-zinc-200 p-3 dark:border-zinc-700">
+            <p className="text-xs uppercase tracking-wide text-zinc-500">Last Audit</p>
+            <p className="mt-1 text-sm font-medium text-zinc-900 dark:text-zinc-100">
+              {homepage?.performanceLastAudited ? homepage.performanceLastAudited.toISOString().slice(0, 10) : "Never"}
+            </p>
+          </div>
+        </div>
+        <div className="mt-3 grid gap-3 md:grid-cols-3">
+          <div className="rounded-xl border border-zinc-200 p-3 dark:border-zinc-700 md:col-span-2">
+            <div className="flex items-center justify-between text-xs text-zinc-500">
+              <span>Checklist progress</span>
+              <span>{checklistPercent}%</span>
+            </div>
+            <div className="mt-2 h-2 w-full rounded-full bg-zinc-200 dark:bg-zinc-700">
+              <div className="h-2 rounded-full bg-[#10b981]" style={{ width: `${checklistPercent}%` }} />
+            </div>
+          </div>
+          <div className="rounded-xl border border-zinc-200 p-3 text-xs text-zinc-600 dark:border-zinc-700 dark:text-zinc-300">
+            <p>Active alerts: <span className="font-semibold">{activeAlertCount}</span></p>
+            <p className="mt-1">Pending growth tasks: <span className="font-semibold">{openGrowthTaskCount}</span></p>
+            <p className="mt-1">Open partnerships: <span className="font-semibold">{openPartnershipCount}</span></p>
+          </div>
+        </div>
+      </section>
+
+      <section className="mt-6 grid gap-6 md:grid-cols-2 xl:grid-cols-3">
+        {[
+          { title: "Set & Forget", metric: `${setForgetDone}/${setForgetTotal} complete`, detail: `${setForgetPct}% baseline done`, href: "#set-forget-baseline" },
+          { title: "Lighthouse", metric: `Avg ${lighthouseAvg ?? "—"}`, detail: `Perf ${homepage?.performanceScore ?? "—"} · SEO ${homepage?.seoScore ?? "—"}`, href: "#lighthouse-phase" },
+          { title: "Maintenance", metric: `${activeAlertCount} active`, detail: `${maintenanceAlertsThisMonth} this month`, href: "#maintenance-phase" },
+          { title: "Growth", metric: `${dueThisWeek.length} due this week`, detail: `${dueThisMonth.length} due this month`, href: "#growth-phase" },
+          { title: "Content", metric: `${topContentOpportunities.length} open`, detail: "Service, FAQ, and supporting opportunities", href: "#content-phase" },
+          { title: "Partnerships", metric: `${openPartnershipCount} open`, detail: `${partnerships.length - openPartnershipCount} done`, href: "#partnerships-phase" },
+        ].map((card) => (
+          <article key={card.title} className="rounded-2xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
+            <p className="text-xs uppercase tracking-wide text-zinc-500">Phase</p>
+            <h2 className="mt-1 text-lg font-semibold text-zinc-900 dark:text-zinc-100">{card.title}</h2>
+            <p className="mt-2 text-sm font-medium text-zinc-800 dark:text-zinc-200">{card.metric}</p>
+            <p className="mt-1 text-xs text-zinc-500">{card.detail}</p>
+            <a href={card.href} className="mt-3 inline-block text-xs font-medium underline">
+              View details
+            </a>
+          </article>
+        ))}
+      </section>
+
+      <section
+        id="set-forget-baseline"
+        className="mt-6 rounded-lg border border-emerald-200 bg-emerald-50/70 p-4 dark:border-emerald-900 dark:bg-emerald-950/30"
+      >
+        <h2 className="text-[11px] font-semibold uppercase tracking-wide text-emerald-900 dark:text-emerald-200">
+          Set &amp; Forget baseline
+        </h2>
+        <p className="mt-1 text-xs text-emerald-900/90 dark:text-emerald-200/90">
+          Do this once, then revisit only when a trigger fires (rebrand, URL/service changes, redesign, or tracking
+          updates).
         </p>
-        <div className="mt-3 rounded-md border border-zinc-200 bg-white/80 px-3 py-2 dark:border-zinc-700 dark:bg-zinc-950/40">
-          <p className="text-[11px] font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
-            Recommended focus
-          </p>
-          <p className="mt-1 text-sm font-medium text-zinc-900 dark:text-zinc-100">
-            {readinessRecommended.headline}
-          </p>
-          <p className="mt-0.5 text-xs leading-snug text-zinc-600 dark:text-zinc-400">
-            {readinessRecommended.detail}
-          </p>
+        <p className="mt-3 text-sm font-medium text-zinc-900 dark:text-zinc-100">
+          {setForgetDone}/{setForgetTotal} complete ({setForgetPct}%)
+        </p>
+        <a href="#launch-checklist" className="mt-2 inline-block text-xs font-medium underline">
+          Review checklist baseline items
+        </a>
+      </section>
+
+      <section id="lighthouse-phase" className="mt-4 rounded-lg border border-zinc-200 bg-white p-5 dark:border-zinc-800 dark:bg-zinc-900">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h2 className="text-sm font-medium text-zinc-800 dark:text-zinc-100">Performance &amp; Core Web Vitals</h2>
+            <p className="mt-1 text-xs text-zinc-500">
+              Low performance hurts rankings. Aim for green across the board. Advisory only (not launch-blocking).
+            </p>
+          </div>
+          {homepage ? (
+            <form action={runHomepagePerformanceAuditForm}>
+              <input type="hidden" name="siteId" value={site.id} />
+              <button
+                type="submit"
+                className="rounded border border-zinc-300 px-3 py-1.5 text-xs font-medium dark:border-zinc-600"
+              >
+                {perfAuditStale ? "Run Lighthouse audit" : "Re-run Lighthouse audit"}
+              </button>
+            </form>
+          ) : null}
         </div>
-        <ul className="mt-3 space-y-1.5 border-t border-zinc-200 pt-3 text-xs text-zinc-600 dark:border-zinc-700 dark:text-zinc-400">
-          <li>
-            <span className="font-medium text-zinc-800 dark:text-zinc-200">Onboarding:</span>{" "}
-            {isSiteOnboardingStage(site.onboardingStage)
-              ? SITE_STAGE_LABEL[site.onboardingStage]
-              : site.onboardingStage}
-          </li>
-          <li>
-            <span className="font-medium text-zinc-800 dark:text-zinc-200">Latest audit:</span>{" "}
-            {latestRun
-              ? `${latestRun.status}${latestRun.summary ? ` · ${formatRunSummary(latestRun.summary)}` : ""}`
-              : "No run yet"}
-          </li>
-          <li>
-            <span className="font-medium text-zinc-800 dark:text-zinc-200">Launch checklist:</span>{" "}
-            {launchDone}/{launchTotal} complete ({launchPct}%)
-          </li>
-          <li>
-            <span className="font-medium text-zinc-800 dark:text-zinc-200">Open fix tasks:</span>{" "}
-            {openFixTaskCount === 0 ? "None" : `${openFixTaskCount} open`}
-          </li>
+
+        {homepage ? (
+          <>
+            <div className="mt-4 grid grid-cols-2 gap-3 md:grid-cols-4">
+              <div className="rounded border border-zinc-200 p-3 dark:border-zinc-700">
+                <p className="text-[11px] uppercase tracking-wide text-zinc-500">Performance</p>
+                <p className={`mt-1 text-2xl font-semibold ${scoreColor(homepage.performanceScore)}`}>
+                  {homepage.performanceScore ?? "—"}
+                </p>
+              </div>
+              <div className="rounded border border-zinc-200 p-3 dark:border-zinc-700">
+                <p className="text-[11px] uppercase tracking-wide text-zinc-500">Accessibility</p>
+                <p className={`mt-1 text-2xl font-semibold ${scoreColor(homepage.accessibilityScore)}`}>
+                  {homepage.accessibilityScore ?? "—"}
+                </p>
+              </div>
+              <div className="rounded border border-zinc-200 p-3 dark:border-zinc-700">
+                <p className="text-[11px] uppercase tracking-wide text-zinc-500">Best Practices</p>
+                <p className={`mt-1 text-2xl font-semibold ${scoreColor(homepage.bestPracticesScore)}`}>
+                  {homepage.bestPracticesScore ?? "—"}
+                </p>
+              </div>
+              <div className="rounded border border-zinc-200 p-3 dark:border-zinc-700">
+                <p className="text-[11px] uppercase tracking-wide text-zinc-500">SEO</p>
+                <p className={`mt-1 text-2xl font-semibold ${scoreColor(homepage.seoScore)}`}>
+                  {homepage.seoScore ?? "—"}
+                </p>
+              </div>
+            </div>
+
+            <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-zinc-500">
+              <span>
+                Last audited:{" "}
+                {homepage.performanceLastAudited ? homepage.performanceLastAudited.toISOString() : "Never"}
+              </span>
+              {homepage.performanceAuditUrl ? (
+                <a href={homepage.performanceAuditUrl} target="_blank" rel="noreferrer" className="underline">
+                  Open audit report
+                </a>
+              ) : null}
+              {perfAuditStale ? <span className="text-amber-600 dark:text-amber-400">Audit is older than 7 days</span> : null}
+            </div>
+
+            {perfGuidance.length > 0 ? (
+              <ul className="mt-3 list-inside list-disc space-y-1 text-xs text-zinc-700 dark:text-zinc-300">
+                {perfGuidance.map((g) => (
+                  <li key={`${g.kind}-${g.message}`}>
+                    {g.message}{" "}
+                    {g.href.startsWith("/") ? (
+                      <Link href={g.href} className="underline">
+                        Review
+                      </Link>
+                    ) : (
+                      <a href={g.href} className="underline">
+                        Review
+                      </a>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="mt-3 text-xs text-zinc-500">No advisory performance actions right now.</p>
+            )}
+          </>
+        ) : (
+          <p className="mt-3 text-xs text-zinc-500">
+            No homepage linked yet, so Lighthouse scores are unavailable.
+          </p>
+        )}
+      </section>
+
+      <section id="partnerships-phase" className="mt-4 rounded-lg border border-zinc-200 bg-white p-5 dark:border-zinc-800 dark:bg-zinc-900">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h2 className="text-sm font-medium text-zinc-800 dark:text-zinc-100">Partnerships</h2>
+            <p className="mt-1 text-xs text-zinc-500">
+              Manual tracker for directories, referrals, co-marketing, and local network partnerships.
+            </p>
+          </div>
+        </div>
+
+        <ul className="mt-4 space-y-3">
+          {partnerships.map((p) => (
+            <li key={p.id} className="rounded border border-zinc-200 p-3 dark:border-zinc-700">
+              <p className="text-sm font-medium text-zinc-900 dark:text-zinc-100">{p.partnerName}</p>
+              <p className="mt-1 text-xs text-zinc-500">Type: {p.type} · Last activity: {p.lastActivity.toISOString().slice(0, 10)}</p>
+              <form action={updatePartnershipForm} className="mt-3 grid gap-2 md:grid-cols-3">
+                <input type="hidden" name="siteId" value={site.id} />
+                <input type="hidden" name="partnershipId" value={p.id} />
+                <label className="flex flex-col gap-1 text-xs">
+                  <span className="text-zinc-500">Status</span>
+                  <select
+                    name="status"
+                    defaultValue={p.status}
+                    className="rounded border border-zinc-300 bg-white px-2 py-1.5 text-xs dark:border-zinc-600 dark:bg-zinc-950"
+                  >
+                    <option value="not_started">not started</option>
+                    <option value="in_progress">in progress</option>
+                    <option value="done">done</option>
+                  </select>
+                </label>
+                <label className="flex flex-col gap-1 text-xs md:col-span-2">
+                  <span className="text-zinc-500">Next action</span>
+                  <input
+                    name="nextAction"
+                    defaultValue={p.nextAction ?? ""}
+                    className="rounded border border-zinc-300 bg-white px-2 py-1.5 text-xs dark:border-zinc-600 dark:bg-zinc-950"
+                  />
+                </label>
+                <label className="flex flex-col gap-1 text-xs md:col-span-3">
+                  <span className="text-zinc-500">Notes</span>
+                  <textarea
+                    name="notes"
+                    defaultValue={p.notes ?? ""}
+                    rows={2}
+                    className="rounded border border-zinc-300 bg-white px-2 py-1.5 text-xs dark:border-zinc-600 dark:bg-zinc-950"
+                  />
+                </label>
+                <div className="md:col-span-3 flex flex-wrap gap-2">
+                  <button
+                    type="submit"
+                    className="rounded border border-zinc-300 px-2.5 py-1 text-xs font-medium dark:border-zinc-600"
+                  >
+                    Save partnership item
+                  </button>
+                </div>
+              </form>
+              <form action={logPartnershipActivityForm} className="mt-2">
+                <input type="hidden" name="siteId" value={site.id} />
+                <input type="hidden" name="partnershipId" value={p.id} />
+                <button
+                  type="submit"
+                  className="rounded border border-zinc-300 px-2.5 py-1 text-xs font-medium dark:border-zinc-600"
+                >
+                  Log partnership activity
+                </button>
+              </form>
+            </li>
+          ))}
         </ul>
+      </section>
+
+      <section id="content-phase" className="mt-4 rounded-lg border border-zinc-200 bg-white p-5 dark:border-zinc-800 dark:bg-zinc-900">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h2 className="text-sm font-medium text-zinc-800 dark:text-zinc-100">Content opportunities</h2>
+            <p className="mt-1 text-xs text-zinc-500">
+              Deterministic opportunities from onboarding brief, GEO hint, and growth signals.
+            </p>
+          </div>
+          <form action={generateContentOpportunitiesForm}>
+            <input type="hidden" name="siteId" value={site.id} />
+            <button
+              type="submit"
+              className="rounded border border-zinc-300 px-3 py-1.5 text-xs font-medium dark:border-zinc-600"
+            >
+              Generate new opportunities
+            </button>
+          </form>
+        </div>
+
+        {topContentOpportunities.length === 0 ? (
+          <p className="mt-3 text-xs text-zinc-500">
+            No active opportunities yet. Generate to get 3-5 manual planning options.
+          </p>
+        ) : (
+          <ul className="mt-3 space-y-3">
+            {topContentOpportunities.map((opp) => {
+              const keywords = parseKeywords(opp.keywordSuggestions);
+              return (
+                <li key={opp.id} className="rounded border border-zinc-200 p-3 dark:border-zinc-700">
+                  <div className="flex flex-wrap items-start justify-between gap-2">
+                    <div>
+                      <p className="text-sm font-medium text-zinc-900 dark:text-zinc-100">{opp.topic}</p>
+                      <p className="mt-1 text-xs text-zinc-500">
+                        {opp.type} · priority {opp.priority} · status {opp.status}
+                      </p>
+                    </div>
+                  </div>
+                  <p className="mt-2 text-xs text-zinc-700 dark:text-zinc-300">{opp.reason}</p>
+                  {keywords.length > 0 ? (
+                    <p className="mt-1 text-xs text-zinc-500">Keywords: {keywords.join(" | ")}</p>
+                  ) : null}
+                  <p className="mt-1 text-xs text-zinc-500">Next action: {opp.nextAction}</p>
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    <form action={planContentOpportunityForm}>
+                      <input type="hidden" name="siteId" value={site.id} />
+                      <input type="hidden" name="opportunityId" value={opp.id} />
+                      <button
+                        type="submit"
+                        className="rounded border border-zinc-300 px-2.5 py-1 text-xs font-medium dark:border-zinc-600"
+                      >
+                        Plan this
+                      </button>
+                    </form>
+                    <form action={dismissContentOpportunityForm}>
+                      <input type="hidden" name="siteId" value={site.id} />
+                      <input type="hidden" name="opportunityId" value={opp.id} />
+                      <button
+                        type="submit"
+                        className="rounded border border-zinc-300 px-2.5 py-1 text-xs font-medium dark:border-zinc-600"
+                      >
+                        Dismiss
+                      </button>
+                    </form>
+                    <form action={completeContentOpportunityForm}>
+                      <input type="hidden" name="siteId" value={site.id} />
+                      <input type="hidden" name="opportunityId" value={opp.id} />
+                      <button
+                        type="submit"
+                        className="rounded border border-zinc-300 px-2.5 py-1 text-xs font-medium dark:border-zinc-600"
+                      >
+                        Done
+                      </button>
+                    </form>
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </section>
+
+      <section id="growth-phase" className="mt-4 rounded-lg border border-zinc-200 bg-white p-5 dark:border-zinc-800 dark:bg-zinc-900">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h2 className="text-sm font-medium text-zinc-800 dark:text-zinc-100">Growth cadence</h2>
+            <p className="mt-1 text-xs text-zinc-500">
+              Manual cadence tracker for recurring growth tasks from the field guide.
+            </p>
+          </div>
+          <form action={runGrowthCadenceScanForm}>
+            <input type="hidden" name="siteId" value={site.id} />
+            <button
+              type="submit"
+              className="rounded border border-zinc-300 px-3 py-1.5 text-xs font-medium dark:border-zinc-600"
+            >
+              Run cadence scan
+            </button>
+          </form>
+        </div>
+
+        <div className="mt-4 grid gap-4 md:grid-cols-2">
+          <section className="rounded border border-zinc-200 p-3 dark:border-zinc-700">
+            <h3 className="text-xs font-semibold uppercase tracking-wide text-zinc-500">What&apos;s due this week</h3>
+            {dueThisWeek.length === 0 ? (
+              <p className="mt-2 text-xs text-zinc-500">No pending cadence tasks due this week.</p>
+            ) : (
+              <ul className="mt-2 space-y-2">
+                {dueThisWeek.map((t) => (
+                  <li key={t.id} className="rounded border border-zinc-100 p-2 dark:border-zinc-800">
+                    <p className="text-sm font-medium text-zinc-900 dark:text-zinc-100">{t.description}</p>
+                    <p className="mt-0.5 text-xs text-zinc-500">
+                      {t.cadence} · due {t.dueDate.toISOString().slice(0, 10)} · priority {t.priority}
+                    </p>
+                    <p className="mt-1 text-xs text-zinc-700 dark:text-zinc-300">{t.nextAction}</p>
+                    <div className="mt-2 flex items-center gap-3">
+                      {growthTaskHref(site.id, t.taskKey).startsWith("/") ? (
+                        <Link href={growthTaskHref(site.id, t.taskKey)} className="text-xs underline">
+                          Open related area
+                        </Link>
+                      ) : (
+                        <a href={growthTaskHref(site.id, t.taskKey)} className="text-xs underline">
+                          Open related area
+                        </a>
+                      )}
+                      <form action={markGrowthTaskDoneForm} className="flex items-center gap-2">
+                        <input type="hidden" name="siteId" value={site.id} />
+                        <input type="hidden" name="taskId" value={t.id} />
+                        <label className="flex items-center gap-1 text-xs">
+                          <input type="checkbox" name="confirmDone" required />
+                          Done
+                        </label>
+                        <button
+                          type="submit"
+                          className="rounded border border-zinc-300 px-2 py-0.5 text-xs dark:border-zinc-600"
+                        >
+                          Save
+                        </button>
+                      </form>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
+
+          <section className="rounded border border-zinc-200 p-3 dark:border-zinc-700">
+            <h3 className="text-xs font-semibold uppercase tracking-wide text-zinc-500">This month</h3>
+            {dueThisMonth.length === 0 ? (
+              <p className="mt-2 text-xs text-zinc-500">No pending cadence tasks due this month.</p>
+            ) : (
+              <ul className="mt-2 space-y-2">
+                {dueThisMonth.map((t) => (
+                  <li key={t.id} className="text-sm">
+                    <p className="font-medium text-zinc-900 dark:text-zinc-100">{t.description}</p>
+                    <p className="text-xs text-zinc-500">
+                      {t.cadence} · due {t.dueDate.toISOString().slice(0, 10)} · priority {t.priority}
+                    </p>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
+        </div>
+      </section>
+
+      <section id="maintenance-phase" className="mt-4 rounded-lg border border-zinc-200 bg-white p-5 dark:border-zinc-800 dark:bg-zinc-900">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h2 className="text-sm font-medium text-zinc-800 dark:text-zinc-100">Maintenance alerts</h2>
+            <p className="mt-1 text-xs text-zinc-500">
+              Manual operations panel. The system only surfaces triggers; you review and resolve.
+            </p>
+          </div>
+          <form action={runMaintenanceScanForm}>
+            <input type="hidden" name="siteId" value={site.id} />
+            <button
+              type="submit"
+              className="rounded border border-zinc-300 px-3 py-1.5 text-xs font-medium dark:border-zinc-600"
+            >
+              Run maintenance scan
+            </button>
+          </form>
+        </div>
+
+        <p className="mt-3 text-sm font-medium text-zinc-900 dark:text-zinc-100">
+          {activeMaintenanceAlerts.length} active alert(s) · {maintenanceAlertsThisMonth} total this month
+        </p>
+
+        {activeMaintenanceAlerts.length === 0 ? (
+          <p className="mt-3 text-xs text-zinc-500">No active maintenance alerts.</p>
+        ) : (
+          <ul className="mt-3 space-y-3">
+            {activeMaintenanceAlerts.map((a) => {
+              const trigger = MAINTENANCE_TRIGGER_COPY[a.triggerKey];
+              const triggerName = trigger?.name ?? a.triggerKey;
+              return (
+                <li key={a.id} className="rounded border border-zinc-200 p-3 dark:border-zinc-700">
+                  <div className="flex flex-wrap items-start justify-between gap-2">
+                    <div>
+                      <p className="text-sm font-medium text-zinc-900 dark:text-zinc-100">{triggerName}</p>
+                      <p className="mt-1 text-xs text-zinc-500">Priority: {a.priority}</p>
+                    </div>
+                    <form action={markMaintenanceAlertResolvedForm}>
+                      <input type="hidden" name="siteId" value={site.id} />
+                      <input type="hidden" name="alertId" value={a.id} />
+                      <button
+                        type="submit"
+                        className="rounded border border-zinc-300 px-2.5 py-1 text-xs font-medium dark:border-zinc-600"
+                      >
+                        Mark resolved
+                      </button>
+                    </form>
+                  </div>
+                  <p className="mt-2 text-xs text-zinc-700 dark:text-zinc-300">{a.reason}</p>
+                  {trigger?.why ? (
+                    <p className="mt-1 text-xs text-zinc-500">Why: {trigger.why}</p>
+                  ) : null}
+                  <p className="mt-1 text-xs text-zinc-500">Next action: {a.nextAction}</p>
+                </li>
+              );
+            })}
+          </ul>
+        )}
       </section>
 
       {reportTemplateTexts ? <ReportTemplatesExportSection texts={reportTemplateTexts} /> : null}
 
       <div className="mt-6">
         <LaunchBlockersSection blockers={launchBlockers} />
+      </div>
+      <div className="mt-4">
+        <LaunchWarningsSection warnings={launchWarnings} />
       </div>
 
       <GrowthPipelineSection
@@ -513,6 +1164,132 @@ export default async function SiteSummaryPage({
           {msg}
         </p>
       ) : null}
+
+      <section className="mt-6 rounded-lg border border-zinc-200 bg-white p-5 dark:border-zinc-800 dark:bg-zinc-900">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <h2 className="text-sm font-medium text-zinc-800 dark:text-zinc-100">Metadata and keyword suggestions</h2>
+            <p className="mt-1 text-xs text-zinc-500">
+              Deterministic options from onboarding brief + page type. Never auto-applied.
+            </p>
+          </div>
+          <Link
+            href={`/sites/${site.id}/metadata`}
+            className="rounded border border-zinc-300 px-3 py-1.5 text-xs font-medium dark:border-zinc-600"
+          >
+            Open full metadata workspace
+          </Link>
+        </div>
+
+        <p className="mt-3 text-xs text-zinc-600 dark:text-zinc-400">{siteBrief.geoAreaNoteVisible || site.geoAreaNoteVisible}</p>
+
+        <form method="get" className="mt-4 grid gap-3 md:grid-cols-3">
+          <input type="hidden" name="runId" value={runIdParam ?? ""} />
+          <input type="hidden" name="wl" value={wl ?? ""} />
+          <input type="hidden" name="full" value={full ?? ""} />
+          <label className="flex flex-col gap-1 text-xs">
+            <span className="text-zinc-600 dark:text-zinc-400">Page</span>
+            <select
+              name="seoPageId"
+              defaultValue={selectedSeoPage?.id ?? ""}
+              className="rounded border border-zinc-300 bg-white px-2 py-1.5 font-mono text-xs dark:border-zinc-700 dark:bg-zinc-950"
+            >
+              {sitePages.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.url}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="flex flex-col gap-1 text-xs">
+            <span className="text-zinc-600 dark:text-zinc-400">Page type</span>
+            <select
+              name="seoPageType"
+              defaultValue={selectedSeoPageType}
+              className="rounded border border-zinc-300 bg-white px-2 py-1.5 text-xs dark:border-zinc-700 dark:bg-zinc-950"
+            >
+              {PAGE_TYPES.map((t) => (
+                <option key={t} value={t}>
+                  {t}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="flex flex-col gap-1 text-xs">
+            <span className="text-zinc-600 dark:text-zinc-400">Topic hint (blog)</span>
+            <input
+              name="seoTopicHint"
+              defaultValue={seoTopicHint ?? ""}
+              className="rounded border border-zinc-300 bg-white px-2 py-1.5 text-xs dark:border-zinc-700 dark:bg-zinc-950"
+            />
+          </label>
+          <div className="md:col-span-3">
+            <button
+              type="submit"
+              className="rounded border border-zinc-300 px-3 py-1.5 text-xs font-medium dark:border-zinc-600"
+            >
+              Refresh suggestions
+            </button>
+          </div>
+        </form>
+
+        {selectedSeoPage && seoMetadataOptions && seoKeywords ? (
+          <form action={applyPageMetadataForm} className="mt-4 space-y-4 border-t border-zinc-200 pt-4 dark:border-zinc-800">
+            <input type="hidden" name="siteId" value={site.id} />
+            <input type="hidden" name="pageId" value={selectedSeoPage.id} />
+            <input type="hidden" name="pageType" value={selectedSeoPageType} />
+            {seoTopicHint ? <input type="hidden" name="topicHint" value={seoTopicHint} /> : null}
+
+            <div className="space-y-2">
+              {seoMetadataOptions.map((opt, idx) => (
+                <label
+                  key={`${opt.title}-${idx}`}
+                  className="block rounded border border-zinc-200 p-3 text-sm dark:border-zinc-700"
+                >
+                  <div className="flex items-start gap-2">
+                    <input type="radio" name="selectedOption" value={String(idx)} defaultChecked={idx === 0} />
+                    <div>
+                      <p className="font-medium text-zinc-900 dark:text-zinc-100">{opt.title}</p>
+                      <p className="mt-1 text-zinc-700 dark:text-zinc-300">{opt.metaDescription}</p>
+                      <p className="mt-1 text-xs text-zinc-500">{opt.reasoning}</p>
+                      <p className="text-xs text-zinc-500">{opt.fitNote}</p>
+                    </div>
+                  </div>
+                </label>
+              ))}
+            </div>
+
+            <div>
+              <p className="text-xs font-medium uppercase tracking-wide text-zinc-500">Keyword options (top 3)</p>
+              <ol className="mt-2 list-decimal space-y-2 pl-5 text-sm">
+                {seoKeywords.map((k) => (
+                  <li key={k.keyword}>
+                    <p className="font-medium text-zinc-900 dark:text-zinc-100">{k.keyword}</p>
+                    <p className="text-xs text-zinc-500">
+                      relevance {k.relevanceScore} · opportunity {k.opportunityScore} · intent {k.intentScore} · weighted{" "}
+                      {k.weightedScore}
+                    </p>
+                    <p className="text-xs text-zinc-500">{k.reasoning}</p>
+                  </li>
+                ))}
+              </ol>
+            </div>
+
+            <label className="flex items-start gap-2 text-xs text-zinc-700 dark:text-zinc-300">
+              <input type="checkbox" name="confirmed" value="1" className="mt-0.5" />
+              <span>Confirm before apply. This writes only title/meta/page type; keywords remain suggestions.</span>
+            </label>
+            <button
+              type="submit"
+              className="rounded bg-zinc-900 px-3 py-1.5 text-xs font-medium text-white dark:bg-zinc-100 dark:text-zinc-900"
+            >
+              Apply selected metadata option
+            </button>
+          </form>
+        ) : (
+          <p className="mt-3 text-xs text-zinc-500">Add at least one page to this site to preview metadata suggestions.</p>
+        )}
+      </section>
 
       <section
         className={
@@ -572,6 +1349,9 @@ export default async function SiteSummaryPage({
         <h2 className="text-sm font-medium text-zinc-800 dark:text-zinc-100">Go-live checklist</h2>
         <p className="mt-1 text-xs text-zinc-500">
           Manual confirmations (stored on this site). Not inferred from audits.
+        </p>
+        <p className="mt-1 text-xs text-zinc-500">
+          Set &amp; Forget rows are one-time baseline setup items. Revisit only when a trigger event occurs.
         </p>
         <ul className="mt-4 space-y-4">
           {launchItems.map((item) => (

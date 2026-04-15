@@ -8,8 +8,8 @@
  * 3. **not_ready** — **Audit hard failure** (see `isLaunchAuditHardFailed`): run `failed`,
  *    onboarding `blocked`, summary parse error, or `completed` with at least one failed check.
  * 4. **partly_ready** — `completed`, audit clean so far, but checklist not fully done.
- * 5. **ready** — `completed`, no fails/warnings/summary error, checklist complete.
- * 6. **partly_ready** — Fallback (e.g. `completed` with warnings after checklist done).
+ * 5. **ready** — `completed`, no hard fails/summary error, checklist complete.
+ * 6. **partly_ready** — Fallback (e.g. advisory warnings after checklist done).
  *
  * ## Urgency (sort: higher score first)
  *
@@ -88,7 +88,6 @@ export function evaluateLaunchReadiness(
   if (
     s.latestRunStatus === "completed" &&
     s.checkFailCount === 0 &&
-    s.checkWarnCount === 0 &&
     !s.summaryHasError &&
     s.launchDone >= s.launchExpected
   ) {
@@ -134,8 +133,8 @@ export function launchReadinessMetrics(s: LaunchUrgencySignals): {
  *
  * 1. **not_ready** — No homepage, no audit yet, run in progress, or audit hard failure
  *    (same gate as `isLaunchAuditHardFailed`, including missing run).
- * 2. **ready** — Latest run `completed`, zero fails/warnings/summary error, checklist
- *    complete, zero open fix tasks.
+ * 2. **ready** — Latest run `completed`, zero hard fails/summary error, checklist
+ *    complete, zero blocking open fix tasks.
  * 3. **nearly_ready** — All other cases (e.g. audit warnings, incomplete checklist,
  *    or open fix tasks while audit has no hard failures).
  */
@@ -184,7 +183,6 @@ export function evaluateLaunchReadinessSummary(s: LaunchUrgencySignals): LaunchR
   const auditClean =
     s.latestRunStatus === "completed" &&
     s.checkFailCount === 0 &&
-    s.checkWarnCount === 0 &&
     !s.summaryHasError;
   const checklistComplete = s.launchDone >= s.launchExpected;
   const noOpenFixes = s.openFixTaskCount === 0;
@@ -201,6 +199,6 @@ export function evaluateLaunchReadinessSummary(s: LaunchUrgencySignals): LaunchR
     state: "nearly_ready",
     stateLabel: "Nearly ready",
     nextStep:
-      "Finish the launch checklist, close open fix tasks, and clear any audit warnings before go-live.",
+      "Finish the launch checklist and close launch-blocking fix tasks. Audit warnings are advisory unless promoted.",
   };
 }

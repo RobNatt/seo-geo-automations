@@ -1,0 +1,40 @@
+---
+description: SEO/GEO site onboarding form fields and logic
+globs: "**/*onboarding*.tsx,**/app/sites/**"
+alwaysApply: true
+---
+
+# Onboarding brief fields
+
+## Required conceptual fields (canonical `SiteBrief` shape)
+
+Target persistence: a **`SiteBrief`** model (or equivalent) with:
+
+- **businessName:** `string`
+- **primaryServices:** `string[]` (e.g. `"web design"`, `"SEO"`, `"GEO"`)
+- **targetAudience:** `string` (e.g. `"small businesses"`, `"agencies"`)
+- **marketFocus:** `enum["local", "regional", "national", "dual"]`
+- **serviceArea:** `string[]` (e.g. `"Omaha"`, `"Nebraska metro"`)
+- **primaryConversionGoal:** `string` (e.g. `"booked calls"`, `"lead forms"`)
+- **brandTone:** `enum["professional", "friendly", "technical", "outcome-led"]`
+- **optionalPriorityKeyword:** `string` (optional)
+
+Until `SiteBrief` exists in Prisma, **map** these to `Site` / forms without inventing parallel sources of truth; when adding the model, migrate and **drive all future suggestions from brief data only**.
+
+## Form UX (order)
+
+1. URL entry first.
+2. Brief questions (**3–5 fields max** per screen where possible).
+3. Keyword suggestions generated (deterministic, explainable).
+4. Title/meta options shown.
+5. User **selects and confirms** — never auto-apply.
+
+## Storage rules
+
+- Persist the brief as the **single source of truth** for onboarding-driven SEO/GEO suggestions.
+- Downstream features (metadata, keywords, content hints) should **read brief fields**, not URL patterns alone.
+
+## Implementation notes
+
+- **`dual` market focus:** local/metro in visible copy; national reach in intent — avoid contradictory claims.
+- **serviceArea as `string[]`:** join for display/meta; split on import from single text fields if needed during migration.
